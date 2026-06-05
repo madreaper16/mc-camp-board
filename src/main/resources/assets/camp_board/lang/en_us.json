@@ -1,0 +1,14 @@
+{
+  "block.camp_board.camp_board": "Camp Board",
+  "item.camp_board.camp_board": "Camp Board",
+  "command.camp_board.give.success": "Gave %s Camp Board(s) to %s.",
+  "command.camp_board.save.success": "Camp Board data saved.",
+  "command.camp_board.reload.success": "Camp Board data reloaded.",
+  "command.camp_board.backup.success": "Camp Board backup created: %s",
+  "command.camp_board.export.success": "Camp Board export created: %s",
+  "command.camp_board.project.list.empty": "No Camp Board projects exist yet.",
+  "screen.camp_board.title": "Camp Board",
+  "screen.camp_board.projects": "Projects",
+  "screen.camp_board.suggestions": "Suggestions",
+  "screen.camp_board.archive": "Archive"
+}

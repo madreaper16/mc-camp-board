@@ -1,0 +1,114 @@
+package com.clockworktown.campboard.block;
+
+import com.clockworktown.campboard.CampBoardMod;
+import com.clockworktown.campboard.network.OpenBoardPayload;
+import com.clockworktown.campboard.storage.BoardJson;
+import com.mojang.serialization.MapCodec;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.HorizontalDirectionalBlock;
+import net.minecraft.world.level.block.Mirror;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
+
+public class CampBoardBlock extends HorizontalDirectionalBlock implements net.minecraft.world.level.block.EntityBlock {
+    public static final MapCodec<CampBoardBlock> CODEC = simpleCodec(CampBoardBlock::new);
+    public static final BooleanProperty WALL = BooleanProperty.create("wall");
+    private static final VoxelShape STANDING_NORTH_SOUTH_SHAPE = Shapes.or(
+            box(1.0, 3.0, 7.0, 15.0, 15.0, 9.0),
+            box(7.0, 0.0, 7.25, 9.0, 3.0, 8.75)
+    );
+    private static final VoxelShape STANDING_EAST_WEST_SHAPE = Shapes.or(
+            box(7.0, 3.0, 1.0, 9.0, 15.0, 15.0),
+            box(7.25, 0.0, 7.0, 8.75, 3.0, 9.0)
+    );
+    private static final VoxelShape WALL_NORTH_SHAPE = box(1.0, 3.0, 14.0, 15.0, 15.0, 16.0);
+    private static final VoxelShape WALL_SOUTH_SHAPE = box(1.0, 3.0, 0.0, 15.0, 15.0, 2.0);
+    private static final VoxelShape WALL_WEST_SHAPE = box(14.0, 3.0, 1.0, 16.0, 15.0, 15.0);
+    private static final VoxelShape WALL_EAST_SHAPE = box(0.0, 3.0, 1.0, 2.0, 15.0, 15.0);
+
+    public CampBoardBlock(Properties properties) {
+        super(properties);
+        registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(WALL, false));
+    }
+
+    @Override
+    protected MapCodec<? extends HorizontalDirectionalBlock> codec() {
+        return CODEC;
+    }
+
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        Direction clickedFace = context.getClickedFace();
+        boolean wallMounted = clickedFace.getAxis().isHorizontal();
+        Direction facing = wallMounted ? clickedFace : context.getHorizontalDirection().getOpposite();
+        return defaultBlockState().setValue(FACING, facing).setValue(WALL, wallMounted);
+    }
+
+    @Override
+    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+        if (!level.isClientSide()) {
+            if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer && level.getBlockEntity(pos) instanceof CampBoardBlockEntity boardEntity) {
+                String boardId = CampBoardMod.config().allBoardsGlobal() ? "global" : boardEntity.boardId(level);
+                ServerPlayNetworking.send(serverPlayer, new OpenBoardPayload(boardId, BoardJson.toJson(CampBoardMod.boardState(boardId))));
+            } else {
+                player.sendSystemMessage(Component.literal("Camp Board is available."));
+            }
+        }
+        return InteractionResult.SUCCESS;
+    }
+
+    @Override
+    protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        if (!state.getValue(WALL)) {
+            return state.getValue(FACING).getAxis() == Direction.Axis.X ? STANDING_EAST_WEST_SHAPE : STANDING_NORTH_SOUTH_SHAPE;
+        }
+
+        return switch (state.getValue(FACING)) {
+            case SOUTH -> WALL_SOUTH_SHAPE;
+            case WEST -> WALL_WEST_SHAPE;
+            case EAST -> WALL_EAST_SHAPE;
+            default -> WALL_NORTH_SHAPE;
+        };
+    }
+
+    @Override
+    protected RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
+    }
+
+    @Override
+    protected BlockState rotate(BlockState state, Rotation rotation) {
+        return state.setValue(FACING, rotation.rotate(state.getValue(FACING)));
+    }
+
+    @Override
+    protected BlockState mirror(BlockState state, Mirror mirror) {
+        return rotate(state, mirror.getRotation(state.getValue(FACING)));
+    }
+
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<net.minecraft.world.level.block.Block, BlockState> builder) {
+        builder.add(new Property[]{FACING, WALL});
+    }
+
+    @Override
+    public net.minecraft.world.level.block.entity.BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new CampBoardBlockEntity(pos, state);
+    }
+}

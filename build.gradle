@@ -1,0 +1,84 @@
+buildscript {
+    repositories {
+        maven {
+            name = 'Fabric'
+            url = 'https://maven.fabricmc.net/'
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+
+    dependencies {
+        classpath "net.fabricmc:fabric-loom:${loom_version}"
+    }
+}
+
+apply plugin: 'net.fabricmc.fabric-loom'
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    maven {
+        name = "Jared's maven"
+        url = "https://maven.blamejared.com/"
+    }
+    maven {
+        name = "ModMaven"
+        url = "https://modmaven.dev"
+    }
+    maven {
+        name = "Terraformers"
+        url = "https://maven.terraformersmc.com/releases/"
+    }
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "camp_board" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    compileOnly "mezz.jei:jei-${project.minecraft_version}-common-api:${project.jei_version}"
+    compileOnly "mezz.jei:jei-${project.minecraft_version}-fabric-api:${project.jei_version}"
+    runtimeOnly "mezz.jei:jei-${project.minecraft_version}-fabric:${project.jei_version}"
+    compileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+    runtimeOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+}
+
+processResources {
+    inputs.property "version", project.version
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 25
+}
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+}

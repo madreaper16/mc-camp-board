@@ -1,0 +1,16 @@
+.gradle/
+build/
+out/
+run/
+*.iml
+.idea/
+*.log
+*.log.gz
+*.zip
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local notes and generated server data
+project_brief.md
+serverconfig/
+world/

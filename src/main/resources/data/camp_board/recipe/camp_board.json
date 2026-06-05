@@ -1,0 +1,22 @@
+{
+  "fabric:load_conditions": {
+    "condition": "camp_board:crafting_enabled"
+  },
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "P": "minecraft:spruce_planks",
+    "B": "minecraft:book",
+    "C": "minecraft:chest",
+    "S": "minecraft:birch_sign"
+  },
+  "pattern": [
+    "PPP",
+    "PBP",
+    "CSC"
+  ],
+  "result": {
+    "count": 1,
+    "id": "camp_board:camp_board"
+  }
+}
