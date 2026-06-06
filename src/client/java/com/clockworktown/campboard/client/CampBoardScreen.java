@@ -16,7 +16,11 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,8 +49,10 @@ public class CampBoardScreen extends Screen {
     private String selectedMaterialId;
     private String transferType;
     private DetailPage detailPage = DetailPage.INFO;
-    private int materialPage;
-    private int taskPage;
+    private int materialScroll;
+    private int taskScroll;
+    private EditBox materialItemField;
+    private List<String> materialSuggestions = List.of();
     private final List<EditBox> fields = new ArrayList<>();
 
     public CampBoardScreen(String boardId, BoardState boardState) {
@@ -68,6 +74,7 @@ public class CampBoardScreen extends Screen {
             selectedSuggestionId = null;
             mode = Mode.LIST;
         }
+        clampScrollOffsets();
         rebuild();
     }
 
@@ -79,6 +86,8 @@ public class CampBoardScreen extends Screen {
     private void rebuild() {
         clearWidgets();
         fields.clear();
+        materialItemField = null;
+        materialSuggestions = List.of();
         int left = panelLeft();
         int top = panelTop();
         int width = panelWidth();
@@ -139,7 +148,11 @@ public class CampBoardScreen extends Screen {
             addButton("Submit", left + width - 72, top + 224, 56, 20, () -> sendSuggestionForm(title.getValue(), description.getValue()));
             addButton("Cancel", left + width - 136, top + 224, 56, 20, this::backToList);
         } else if (mode == Mode.MATERIAL_FORM) {
-            EditBox itemId = field(x, y, 220, "minecraft:spruce_planks"); y += 30;
+            EditBox itemId = field(x, y, 300, "minecraft:spruce_planks");
+            materialItemField = itemId;
+            itemId.setResponder(value -> materialSuggestions = itemSuggestions(value));
+            materialSuggestions = itemSuggestions(itemId.getValue());
+            y += 88;
             EditBox amount = field(x, y, 80, "128");
             addButton("Save", left + width - 72, top + 224, 56, 20, () -> action("add_material", selectedProjectId, object -> {
                 object.addProperty("itemId", itemId.getValue());
@@ -206,6 +219,7 @@ public class CampBoardScreen extends Screen {
         } else {
             drawForm(graphics, left + 16, top + 88);
         }
+        drawMaterialSuggestions(graphics);
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
     }
 
@@ -257,11 +271,10 @@ public class CampBoardScreen extends Screen {
         text(graphics, "Materials", left, y, HEADER_TEXT);
         y += 24;
         List<MaterialStack> materials = visibleMaterials(project);
-        for (MaterialStack material : materials.stream().skip(materialPage * materialsPerPage()).limit(materialsPerPage()).toList()) {
+        for (MaterialStack material : materials.stream().skip(materialScroll).limit(visibleDetailRows()).toList()) {
             text(graphics, fit(material.itemId() + " " + material.stored() + "/" + material.requested(), width - 24), left, y, TEXT_COLOR);
             y += 42;
         }
-        drawPageLabel(graphics, left + width - 78, top + 156, materialPage, pageCount(materials.size(), materialsPerPage()));
     }
 
     private void drawTasksPage(GuiGraphicsExtractor graphics, int left, int top, int width, Project project) {
@@ -269,11 +282,10 @@ public class CampBoardScreen extends Screen {
         text(graphics, "Tasks", left, y, HEADER_TEXT);
         y += 24;
         List<ProjectTask> tasks = project.tasks();
-        for (ProjectTask task : tasks.stream().skip(taskPage * tasksPerPage()).limit(tasksPerPage()).toList()) {
+        for (ProjectTask task : tasks.stream().skip(taskScroll).limit(visibleDetailRows()).toList()) {
             text(graphics, fit((task.completed() ? "[x] " : "[ ] ") + task.title() + " (" + task.helpers().size() + " helping)", width - 24), left, y, TEXT_COLOR);
             y += 42;
         }
-        drawPageLabel(graphics, left + width - 78, top + 156, taskPage, pageCount(tasks.size(), tasksPerPage()));
     }
 
     private void drawSuggestionDetail(GuiGraphicsExtractor graphics, int left, int top, int width) {
@@ -307,7 +319,7 @@ public class CampBoardScreen extends Screen {
             text(graphics, "Description", left, y + 30, MUTED_TEXT_COLOR);
         } else if (mode == Mode.MATERIAL_FORM) {
             text(graphics, "Item ID", left, y, MUTED_TEXT_COLOR);
-            text(graphics, "Requested amount", left, y + 30, MUTED_TEXT_COLOR);
+            text(graphics, "Requested amount", left, y + 88, MUTED_TEXT_COLOR);
         } else if (mode == Mode.MATERIAL_TRANSFER_FORM) {
             MaterialStack material = currentMaterial();
             int max = material == null ? 0 : ("withdraw".equals(transferType) ? material.stored() : material.remaining());
@@ -328,8 +340,8 @@ public class CampBoardScreen extends Screen {
         selectedSuggestionId = null;
         mode = Mode.LIST;
         detailPage = DetailPage.INFO;
-        materialPage = 0;
-        taskPage = 0;
+        materialScroll = 0;
+        taskScroll = 0;
         rebuild();
     }
 
@@ -364,29 +376,29 @@ public class CampBoardScreen extends Screen {
         }
         if (detailPage == DetailPage.MATERIALS) {
             List<MaterialStack> materials = visibleMaterials(project);
-            int start = materialPage * materialsPerPage();
+            clampMaterialScroll(materials.size());
+            int start = materialScroll;
             int y = top + 158;
-            for (MaterialStack material : materials.stream().skip(start).limit(materialsPerPage()).toList()) {
+            for (MaterialStack material : materials.stream().skip(start).limit(visibleDetailRows()).toList()) {
                 String itemId = material.itemId();
                 if (!readOnly) {
-                    addButton("+", left + 8, y, 16, 12, () -> openTransfer("contribute", itemId));
-                    addButton("-", left + 30, y, 16, 12, () -> openTransfer("withdraw", itemId));
+                    addButton("-", left + 8, y, 16, 12, () -> openTransfer("withdraw", itemId));
+                    addButton("+", left + 30, y, 16, 12, () -> openTransfer("contribute", itemId));
                 }
                 y += 42;
             }
-            addPagerButtons(left, top, width, materialPage, pageCount(materials.size(), materialsPerPage()), true);
         } else if (detailPage == DetailPage.TASKS) {
             List<ProjectTask> tasks = project.tasks();
-            int start = taskPage * tasksPerPage();
+            clampTaskScroll(tasks.size());
+            int start = taskScroll;
             int y = top + 158;
-            for (ProjectTask task : tasks.stream().skip(start).limit(tasksPerPage()).toList()) {
+            for (ProjectTask task : tasks.stream().skip(start).limit(visibleDetailRows()).toList()) {
                 if (!readOnly) {
                     addButton("Help", left + 8, y, 28, 12, () -> taskAction("toggle_help", task.id(), null));
                     addButton("Done", left + 42, y, 28, 12, () -> taskAction("complete_task", task.id(), null));
                 }
                 y += 42;
             }
-            addPagerButtons(left, top, width, taskPage, pageCount(tasks.size(), tasksPerPage()), false);
         }
     }
 
@@ -424,30 +436,8 @@ public class CampBoardScreen extends Screen {
 
     private void switchDetailPage(DetailPage page) {
         detailPage = page;
+        clampScrollOffsets();
         rebuild();
-    }
-
-    private void addPagerButtons(int left, int top, int width, int currentPage, int pageCount, boolean materials) {
-        if (pageCount <= 1) {
-            return;
-        }
-        int y = top + panelHeight() - 28;
-        addButton("<", left + width - 84, y, 28, 18, () -> {
-            if (materials) {
-                materialPage = Math.max(0, materialPage - 1);
-            } else {
-                taskPage = Math.max(0, taskPage - 1);
-            }
-            rebuild();
-        });
-        addButton(">", left + width - 48, y, 28, 18, () -> {
-            if (materials) {
-                materialPage = Math.min(pageCount - 1, materialPage + 1);
-            } else {
-                taskPage = Math.min(pageCount - 1, taskPage + 1);
-            }
-            rebuild();
-        });
     }
 
     private void sendProjectForm(String id, String title, String description) {
@@ -514,6 +504,42 @@ public class CampBoardScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal(label), button -> action.run()).bounds(x, y, width, height).build());
     }
 
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (mode == Mode.LIST && selectedProjectId != null) {
+            Project project = findProject(selectedProjectId);
+            if (project != null && detailPage == DetailPage.MATERIALS) {
+                materialScroll -= (int) Math.signum(scrollY);
+                clampMaterialScroll(visibleMaterials(project).size());
+                rebuild();
+                return true;
+            }
+            if (project != null && detailPage == DetailPage.TASKS) {
+                taskScroll -= (int) Math.signum(scrollY);
+                clampTaskScroll(project.tasks().size());
+                rebuild();
+                return true;
+            }
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (selectMaterialSuggestion(event.x(), event.y())) {
+            return true;
+        }
+        return super.mouseClicked(event, doubleClick);
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (event.key() == GLFW.GLFW_KEY_TAB && completeMaterialSuggestion()) {
+            return true;
+        }
+        return super.keyPressed(event);
+    }
+
     private List<Project> activeProjects() {
         return boardState.projects().stream().filter(project -> project.status() != ProjectStatus.ARCHIVED && project.status() != ProjectStatus.COMPLETED).toList();
     }
@@ -552,22 +578,31 @@ public class CampBoardScreen extends Screen {
                 .orElse("None");
     }
 
-    private int pageCount(int size, int pageSize) {
-        return Math.max(1, (size + pageSize - 1) / pageSize);
-    }
-
-    private int materialsPerPage() {
+    private int visibleDetailRows() {
         return 3;
     }
 
-    private int tasksPerPage() {
-        return 3;
-    }
-
-    private void drawPageLabel(GuiGraphicsExtractor graphics, int left, int y, int page, int pageCount) {
-        if (pageCount > 1) {
-            text(graphics, "Page " + (page + 1) + "/" + pageCount, left, y, MUTED_TEXT_COLOR);
+    private void clampScrollOffsets() {
+        Project project = findProject(selectedProjectId);
+        if (project == null) {
+            materialScroll = 0;
+            taskScroll = 0;
+            return;
         }
+        clampMaterialScroll(visibleMaterials(project).size());
+        clampTaskScroll(project.tasks().size());
+    }
+
+    private void clampMaterialScroll(int size) {
+        materialScroll = Math.max(0, Math.min(materialScroll, maxScroll(size)));
+    }
+
+    private void clampTaskScroll(int size) {
+        taskScroll = Math.max(0, Math.min(taskScroll, maxScroll(size)));
+    }
+
+    private int maxScroll(int size) {
+        return Math.max(0, size - visibleDetailRows());
     }
 
     private String fit(String value, int maxWidth) {
@@ -611,6 +646,68 @@ public class CampBoardScreen extends Screen {
 
     private void centeredText(GuiGraphicsExtractor graphics, String value, int centerX, int y, int color) {
         graphics.text(font, value, centerX - font.width(value) / 2, y, color, false);
+    }
+
+    private List<String> itemSuggestions(String value) {
+        String query = value == null ? "" : value.trim().toLowerCase();
+        if (query.length() < 2) {
+            return List.of();
+        }
+        return BuiltInRegistries.ITEM.keySet().stream()
+                .map(Object::toString)
+                .filter(id -> id.contains(query))
+                .limit(5)
+                .toList();
+    }
+
+    private void drawMaterialSuggestions(GuiGraphicsExtractor graphics) {
+        if (mode != Mode.MATERIAL_FORM || materialItemField == null || materialSuggestions.isEmpty()) {
+            return;
+        }
+        int left = materialSuggestionLeft();
+        int top = materialItemField.getY() + 22;
+        int width = materialSuggestionWidth();
+        int y = top;
+        for (String suggestion : materialSuggestions) {
+            graphics.fill(left, y, left + width, y + 12, 0xEE2B1B10);
+            text(graphics, fit(suggestion, width - 6), left + 3, y + 2, 0xFFFFE3A8);
+            y += 12;
+        }
+    }
+
+    private boolean selectMaterialSuggestion(double mouseX, double mouseY) {
+        if (mode != Mode.MATERIAL_FORM || materialItemField == null || materialSuggestions.isEmpty()) {
+            return false;
+        }
+        int left = materialSuggestionLeft();
+        int top = materialItemField.getY() + 22;
+        int width = materialSuggestionWidth();
+        for (int index = 0; index < materialSuggestions.size(); index++) {
+            int y = top + index * 12;
+            if (mouseX >= left && mouseX <= left + width && mouseY >= y && mouseY <= y + 12) {
+                materialItemField.setValue(materialSuggestions.get(index));
+                materialSuggestions = List.of();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int materialSuggestionLeft() {
+        return materialItemField.getX();
+    }
+
+    private int materialSuggestionWidth() {
+        return materialItemField.getWidth();
+    }
+
+    private boolean completeMaterialSuggestion() {
+        if (mode != Mode.MATERIAL_FORM || materialItemField == null || materialSuggestions.isEmpty()) {
+            return false;
+        }
+        materialItemField.setValue(materialSuggestions.getFirst());
+        materialSuggestions = List.of();
+        return true;
     }
 
     private int parseInt(String value) {
