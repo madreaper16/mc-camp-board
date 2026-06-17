@@ -5,6 +5,7 @@ import com.clockworktown.campboard.block.CampBoardBlockEntity;
 import com.clockworktown.campboard.command.CampBoardCommands;
 import com.clockworktown.campboard.config.CampBoardConfig;
 import com.clockworktown.campboard.data.BoardState;
+import com.clockworktown.campboard.data.Project;
 import com.clockworktown.campboard.network.BoardActionHandler;
 import com.clockworktown.campboard.network.BoardActionPayload;
 import com.clockworktown.campboard.network.OpenBoardPayload;
@@ -39,7 +40,10 @@ import net.minecraft.world.level.storage.LevelResource;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 public class CampBoardMod implements ModInitializer {
     public static final String MOD_ID = "camp_board";
@@ -123,6 +127,38 @@ public class CampBoardMod implements ModInitializer {
         }
     }
 
+    public static Optional<ProjectMatch> findProject(String projectId) {
+        Optional<Project> globalProject = boardState.findProject(projectId);
+        if (globalProject.isPresent()) {
+            return Optional.of(new ProjectMatch("", boardState, globalProject.get()));
+        }
+
+        Set<String> ids = new LinkedHashSet<>(boardStates.keySet());
+        if (storage != null) {
+            try {
+                ids.addAll(storage.boardIds());
+            } catch (IOException ignored) {
+            }
+        }
+
+        for (String boardId : ids) {
+            BoardState state = boardState(boardId);
+            Optional<Project> project = state.findProject(projectId);
+            if (project.isPresent()) {
+                return Optional.of(new ProjectMatch(boardId, state, project.get()));
+            }
+        }
+        return Optional.empty();
+    }
+
+    public static void saveProjectMatch(ProjectMatch match) throws IOException {
+        if (match.boardId().isBlank()) {
+            save();
+        } else {
+            saveBoard(match.boardId());
+        }
+    }
+
     public static Path importDirectory(MinecraftServer server) {
         return serverConfigPath(server).resolve("campboard").resolve("imports");
     }
@@ -161,6 +197,9 @@ public class CampBoardMod implements ModInitializer {
         if (storage == null) {
             throw new IllegalStateException("Camp Board storage has not been initialized yet.");
         }
+    }
+
+    public record ProjectMatch(String boardId, BoardState state, Project project) {
     }
 
     private static Block registerBlock() {

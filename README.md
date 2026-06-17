@@ -213,6 +213,8 @@ Material import files are read from:
 serverconfig/campboard/imports/
 ```
 
+The import command can target projects on the global board or projects created on any placed Camp Board.
+
 The importer accepts common text formats with one material per line. Each line must include an amount and a registry item id.
 
 Supported examples:

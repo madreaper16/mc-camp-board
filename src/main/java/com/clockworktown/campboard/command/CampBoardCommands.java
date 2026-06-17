@@ -295,27 +295,34 @@ public final class CampBoardCommands {
     }
 
     private static int adjustMaterial(CommandContext<CommandSourceStack> context, String projectId, String itemId, int amount) {
-        Project project = CampBoardMod.boardState().findProject(projectId).orElse(null);
-        if (project == null) {
+        CampBoardMod.ProjectMatch match = CampBoardMod.findProject(projectId).orElse(null);
+        if (match == null) {
             context.getSource().sendFailure(Component.literal("No project found with id " + projectId + "."));
             return 0;
         }
 
+        Project project = match.project();
         MaterialStack material = project.materials().computeIfAbsent(itemId, key -> new MaterialStack(key, amount));
         material.adjustStored(amount);
         project.log(actor(context), "Adjusted " + itemId + " stored count to " + amount + ".");
-        CampBoardMod.saveQuietly();
+        try {
+            CampBoardMod.saveProjectMatch(match);
+        } catch (IOException exception) {
+            context.getSource().sendFailure(Component.literal("Failed to save material adjustment: " + exception.getMessage()));
+            return 0;
+        }
         context.getSource().sendSuccess(() -> Component.literal("Adjusted " + itemId + " to " + amount + " for " + projectId + "."), true);
         return amount;
     }
 
     private static int importMaterials(CommandContext<CommandSourceStack> context, String projectId, String fileName) {
-        Project project = CampBoardMod.boardState().findProject(projectId).orElse(null);
-        if (project == null) {
+        CampBoardMod.ProjectMatch match = CampBoardMod.findProject(projectId).orElse(null);
+        if (match == null) {
             context.getSource().sendFailure(Component.literal("No project found with id " + projectId + "."));
             return 0;
         }
 
+        Project project = match.project();
         Path imports = CampBoardMod.importDirectory(context.getSource().getServer()).normalize();
         Path file = imports.resolve(fileName).normalize();
         if (!file.startsWith(imports)) {
@@ -335,7 +342,7 @@ public final class CampBoardCommands {
                 }
             }
             project.log(actor(context), "Imported " + imported + " material request(s) from " + file.getFileName() + ".");
-            CampBoardMod.saveQuietly();
+            CampBoardMod.saveProjectMatch(match);
             int importedCount = imported;
             context.getSource().sendSuccess(() -> Component.literal("Imported " + importedCount + " material request(s) for " + projectId + "."), true);
             return importedCount;

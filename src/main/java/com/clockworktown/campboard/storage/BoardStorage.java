@@ -41,6 +41,20 @@ public class BoardStorage {
         return loadBoardFile(boardFile(boardId));
     }
 
+    public List<String> boardIds() throws IOException {
+        Path boardsDirectory = directory.resolve("boards");
+        if (!Files.exists(boardsDirectory)) {
+            return List.of();
+        }
+
+        try (Stream<Path> stream = Files.list(boardsDirectory)) {
+            return stream
+                    .filter(path -> path.getFileName().toString().endsWith(".json"))
+                    .map(path -> path.getFileName().toString().replaceFirst("\\.json$", ""))
+                    .toList();
+        }
+    }
+
     private BoardState loadBoardFile(Path dataFile) throws IOException {
         if (!Files.exists(dataFile)) {
             return new BoardState();
