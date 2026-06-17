@@ -24,7 +24,7 @@ public class CampBoardConfigScreen extends Screen {
     private void rebuild() {
         clearWidgets();
         int center = width / 2;
-        int y = 78;
+        int y = 58;
 
         addToggle(center, y, craftingLabel(), () -> {
             CampBoardMod.config().setCraftingEnabled(!CampBoardMod.config().craftingEnabled());
@@ -34,6 +34,18 @@ public class CampBoardConfigScreen extends Screen {
 
         addToggle(center, y, globalLabel(), () -> {
             CampBoardMod.config().setAllBoardsGlobal(!CampBoardMod.config().allBoardsGlobal());
+            saveAndRebuild();
+        });
+        y += 24;
+
+        addToggle(center, y, boardSizeLabel(), () -> {
+            CampBoardMod.config().setLargeBoard(!CampBoardMod.config().largeBoard());
+            saveAndRebuild();
+        });
+        y += 24;
+
+        addToggle(center, y, breakableLabel(), () -> {
+            CampBoardMod.config().setBreakable(!CampBoardMod.config().breakable());
             saveAndRebuild();
         });
         y += 24;
@@ -137,6 +149,14 @@ public class CampBoardConfigScreen extends Screen {
 
     private String globalLabel() {
         return "All Boards Global: " + (CampBoardMod.config().allBoardsGlobal() ? "Enabled" : "Disabled");
+    }
+
+    private String boardSizeLabel() {
+        return "Board Size: " + (CampBoardMod.config().largeBoard() ? "Large" : "Standard");
+    }
+
+    private String breakableLabel() {
+        return "Breakable: " + (CampBoardMod.config().breakable() ? "Enabled" : "Command Only");
     }
 
     private String projectCreationLabel() {

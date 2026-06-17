@@ -1,34 +1,72 @@
 {
-  "variants": {
-    "facing=north,wall=false": {
-      "model": "camp_board:block/camp_board"
+  "multipart": [
+    {
+      "when": {"facing": "north", "large": "false", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board"}
     },
-    "facing=east,wall=false": {
-      "model": "camp_board:block/camp_board",
-      "y": 90
+    {
+      "when": {"facing": "east", "large": "false", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board", "y": 90}
     },
-    "facing=south,wall=false": {
-      "model": "camp_board:block/camp_board",
-      "y": 180
+    {
+      "when": {"facing": "south", "large": "false", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board", "y": 180}
     },
-    "facing=west,wall=false": {
-      "model": "camp_board:block/camp_board",
-      "y": 270
+    {
+      "when": {"facing": "west", "large": "false", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board", "y": 270}
     },
-    "facing=north,wall=true": {
-      "model": "camp_board:block/camp_board_wall"
+    {
+      "when": {"facing": "north", "large": "false", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall"}
     },
-    "facing=east,wall=true": {
-      "model": "camp_board:block/camp_board_wall",
-      "y": 90
+    {
+      "when": {"facing": "east", "large": "false", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall", "y": 90}
     },
-    "facing=south,wall=true": {
-      "model": "camp_board:block/camp_board_wall",
-      "y": 180
+    {
+      "when": {"facing": "south", "large": "false", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall", "y": 180}
     },
-    "facing=west,wall=true": {
-      "model": "camp_board:block/camp_board_wall",
-      "y": 270
+    {
+      "when": {"facing": "west", "large": "false", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall", "y": 270}
+    },
+    {
+      "when": {"facing": "north", "large": "true", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board_large"}
+    },
+    {
+      "when": {"facing": "east", "large": "true", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board_large", "y": 90}
+    },
+    {
+      "when": {"facing": "south", "large": "true", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board_large", "y": 180}
+    },
+    {
+      "when": {"facing": "west", "large": "true", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board_large", "y": 270}
+    },
+    {
+      "when": {"facing": "north", "large": "true", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall_large"}
+    },
+    {
+      "when": {"facing": "east", "large": "true", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall_large", "y": 90}
+    },
+    {
+      "when": {"facing": "south", "large": "true", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall_large", "y": 180}
+    },
+    {
+      "when": {"facing": "west", "large": "true", "wall": "true"},
+      "apply": {"model": "camp_board:block/camp_board_wall_large", "y": 270}
+    },
+    {
+      "when": {"large": "true", "part": "1", "wall": "false"},
+      "apply": {"model": "camp_board:block/camp_board_large_post"}
     }
-  }
+  ]
 }

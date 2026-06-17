@@ -20,6 +20,8 @@ Camp Board is intended to be installed on both the server and connecting clients
 
 - Placeable spruce Camp Board block
 - Freestanding and wall-mounted placement
+- Standard or large board placement
+- Optional command-only board removal
 - Separate data for each placed board by default
 - Optional global-board mode
 - Projects, suggestions, and archive views
@@ -61,6 +63,7 @@ serverconfig/campboard/config.json
 serverconfig/campboard/projects.json
 serverconfig/campboard/boards/
 serverconfig/campboard/backups/
+serverconfig/campboard/imports/
 ```
 
 `projects.json` is used by the command/global board data. Placed boards use files in the `boards` folder unless `allBoardsGlobal` is enabled.
@@ -95,6 +98,7 @@ Examples:
 /campboard backup
 /campboard restore <backupName>
 /campboard export
+/campboard remove
 ```
 
 Examples:
@@ -105,7 +109,10 @@ Examples:
 /campboard backup
 /campboard restore projects-2026-06-02T23-55-00Z.json
 /campboard export
+/campboard remove
 ```
+
+`/campboard remove` removes the Camp Board the command runner is looking at. It is mainly intended for servers that disable normal Camp Board breaking.
 
 ### Config
 
@@ -123,6 +130,8 @@ suggestionsEnabled
 materialsEnabled
 anyoneCanWithdrawMaterials
 taskHelpingEnabled
+largeBoard
+breakable
 projectCreation
 maxProjectLeaders
 maxDescriptionLength
@@ -138,6 +147,8 @@ suggestionsEnabled: true or false
 materialsEnabled: true or false
 anyoneCanWithdrawMaterials: true or false
 taskHelpingEnabled: true or false
+largeBoard: true or false
+breakable: true or false
 projectCreation: ADMIN_ONLY or ANYONE
 maxProjectLeaders: 1 to 3
 maxDescriptionLength: 50 to 250
@@ -152,6 +163,8 @@ Examples:
 /campboard config set projectCreation ANYONE
 /campboard config set craftingEnabled false
 /campboard config set allBoardsGlobal true
+/campboard config set largeBoard true
+/campboard config set breakable false
 /campboard config set backupRetention 10
 ```
 
@@ -182,6 +195,7 @@ Projects with stored materials cannot be deleted until those materials are withd
 
 ```mcfunction
 /campboard materials adjust <projectId> <itemId> <amount>
+/campboard materials import <projectId> <fileName>
 ```
 
 Examples:
@@ -190,7 +204,27 @@ Examples:
 /campboard materials adjust nether_hub minecraft:stone 64
 /campboard materials adjust nether_hub minecraft:spruce_planks 128
 /campboard materials adjust nether_hub minecraft:glass 0
+/campboard materials import nether_hub nether_hub_materials.txt
 ```
+
+Material import files are read from:
+
+```text
+serverconfig/campboard/imports/
+```
+
+The importer accepts common text formats with one material per line. Each line must include an amount and a registry item id.
+
+Supported examples:
+
+```text
+minecraft:stone 128
+128 minecraft:stone
+minecraft:spruce_planks, 64
+64 - minecraft:glass
+```
+
+Lines starting with `#` or text after `#` are ignored. Litematica material lists can be imported when exported or converted to item-id text using the same amount-plus-registry-id format.
 
 ## Building
 

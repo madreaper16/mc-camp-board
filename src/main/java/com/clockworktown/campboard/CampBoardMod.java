@@ -13,6 +13,7 @@ import com.clockworktown.campboard.storage.BoardStorage;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
@@ -60,6 +61,7 @@ public class CampBoardMod implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(BoardActionPayload.TYPE, BoardActionHandler::handle);
         CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.FUNCTIONAL_BLOCKS).register(entries -> entries.accept(new ItemStack(CAMP_BOARD_ITEM), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS));
         CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.BUILDING_BLOCKS).register(entries -> entries.accept(new ItemStack(CAMP_BOARD_ITEM), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS));
+        PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> !state.is(CAMP_BOARD_BLOCK) || config.breakable());
         CampBoardCommands.register();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             try {
@@ -119,6 +121,10 @@ public class CampBoardMod implements ModInitializer {
             storage.saveBoard(boardId, boardState(boardId), config);
             storage.saveConfig(config);
         }
+    }
+
+    public static Path importDirectory(MinecraftServer server) {
+        return serverConfigPath(server).resolve("campboard").resolve("imports");
     }
 
     public static void saveQuietly() {

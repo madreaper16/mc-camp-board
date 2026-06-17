@@ -8,6 +8,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
+import java.util.UUID;
+
 public class CampBoardBlockEntity extends BlockEntity {
     private String boardId = "";
 
@@ -21,11 +23,15 @@ public class CampBoardBlockEntity extends BlockEntity {
 
     public String boardId(Level level) {
         if (boardId == null || boardId.isBlank()) {
-            String dimension = level.dimension().toString().replaceAll("[^a-zA-Z0-9_\\-]", "_");
-            boardId = dimension + "_" + worldPosition.getX() + "_" + worldPosition.getY() + "_" + worldPosition.getZ();
+            boardId = "board_" + UUID.randomUUID().toString().replace("-", "");
             setChanged();
         }
         return boardId;
+    }
+
+    public void setBoardId(String boardId) {
+        this.boardId = boardId == null ? "" : boardId;
+        setChanged();
     }
 
     @Override

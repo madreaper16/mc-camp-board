@@ -7,6 +7,8 @@ public class CampBoardConfig {
     private boolean materialsEnabled = true;
     private boolean anyoneCanWithdrawMaterials = true;
     private boolean taskHelpingEnabled = true;
+    private boolean largeBoard = false;
+    private boolean breakable = true;
     private String projectCreation = "ADMIN_ONLY";
     private int maxProjectLeaders = 3;
     private int maxDescriptionLength = 250;
@@ -38,6 +40,14 @@ public class CampBoardConfig {
 
     public boolean taskHelpingEnabled() {
         return taskHelpingEnabled;
+    }
+
+    public boolean largeBoard() {
+        return largeBoard;
+    }
+
+    public boolean breakable() {
+        return breakable;
     }
 
     public String projectCreation() {
@@ -78,6 +88,14 @@ public class CampBoardConfig {
 
     public void setTaskHelpingEnabled(boolean taskHelpingEnabled) {
         this.taskHelpingEnabled = taskHelpingEnabled;
+    }
+
+    public void setLargeBoard(boolean largeBoard) {
+        this.largeBoard = largeBoard;
+    }
+
+    public void setBreakable(boolean breakable) {
+        this.breakable = breakable;
     }
 
     public void setProjectCreation(String projectCreation) {

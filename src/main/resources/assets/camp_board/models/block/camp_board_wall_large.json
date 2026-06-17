@@ -1,0 +1,30 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "spruce": "minecraft:block/spruce_planks",
+    "dark": "minecraft:block/spruce_log",
+    "paper": "camp_board:block/camp_board_paper",
+    "particle": "minecraft:block/spruce_planks"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 14],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#spruce"},
+        "east": {"uv": [0, 0, 2, 16], "texture": "#dark"},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#spruce"},
+        "west": {"uv": [0, 0, 2, 16], "texture": "#dark"},
+        "up": {"uv": [0, 0, 16, 2], "texture": "#dark"},
+        "down": {"uv": [0, 0, 16, 2], "texture": "#dark"}
+      }
+    },
+    {
+      "from": [1, 1, 13.8],
+      "to": [15, 15, 13.9],
+      "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#paper"}
+      }
+    }
+  ]
+}
