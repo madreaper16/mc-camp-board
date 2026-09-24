@@ -106,7 +106,7 @@ public class CampBoardConfigScreen extends Screen {
             saveAndRebuild();
         });
 
-        addRenderableWidget(Button.builder(Component.literal("Done"), button -> minecraft.setScreen(parent))
+        addRenderableWidget(Button.builder(Component.literal("Done"), button -> minecraft.gui.setScreen(parent))
                 .bounds(center - 50, height - 32, 100, 20)
                 .build());
     }

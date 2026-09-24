@@ -12,10 +12,10 @@ public class CampBoardClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(OpenBoardPayload.TYPE, (payload, context) -> {
             BoardState boardState = BoardJson.fromJson(payload.boardJson());
             context.client().execute(() -> {
-                if (context.client().screen instanceof CampBoardScreen screen) {
+                if (context.client().gui.screen() instanceof CampBoardScreen screen) {
                     screen.updateBoardState(payload.boardId(), boardState);
                 } else {
-                    context.client().setScreen(new CampBoardScreen(payload.boardId(), boardState));
+                    context.client().gui.setScreen(new CampBoardScreen(payload.boardId(), boardState));
                 }
             });
         });
