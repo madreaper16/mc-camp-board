@@ -1,20 +1,20 @@
 # Camp Board
 
-Camp Board is a Fabric mod for Minecraft Java 26.2 that adds placeable project boards for small servers. Each board can track builds, suggestions, tasks, leaders, locations, and shared material requests from an in-world UI.
+Camp Board is a Fabric mod for Minecraft Java 26.3 that adds placeable project boards for small servers. Each board can track builds, suggestions, tasks, leaders, locations, and shared material requests from an in-world UI.
 
-This branch contains `1.0.1+26.2`. It has automated regression coverage and clean build verification; live Minecraft rendering and dedicated-server multiplayer have not been tested for this build.
+This branch contains `1.0.1+26.3`, based on the 26.2 reliability update. It has automated regression coverage and clean build verification; live Minecraft rendering and dedicated-server multiplayer have not been tested for this build. The 26.2 build is maintained separately.
 
 ## Requirements
 
-- Minecraft Java 26.2
-- Fabric Loader 0.19.4 or newer
-- Fabric API 0.158.0+26.2 or newer
+- Minecraft Java 26.3
+- Fabric Loader 0.20.1 or newer
+- Fabric API 0.165.2+26.3 or newer
 - Java 25
 
 Optional client integrations:
 
-- Just Enough Items 30.31.0.206 for 26.2 (build-verified version)
-- Mod Menu 20.0.0 (build-verified version)
+- Just Enough Items 31.14.0.72 for 26.3 (build-verified version; also requires MezzConfig, resolved as 0.6.6 in development)
+- Mod Menu 21.0.0 (build-verified version)
 
 Install the same Camp Board candidate on both the server and connecting clients. Remove older Camp Board jars before updating. The candidate uses a new packet protocol and does not exchange board actions with older builds.
 
@@ -267,7 +267,7 @@ build/libs/camp-board-<version>.jar
 
 Do not upload or install the `-sources.jar` file as the playable mod.
 
-On macOS/Linux, use `sh ./gradlew clean build`. The wrapper pins Gradle 9.5.0. Build verification includes JUnit tests for storage, backup/restore, material conservation, imports, project lookup, identity permissions, configuration copies, and chunked board transfers. No server is started by the tests.
+On macOS/Linux, use `sh ./gradlew clean build`. The wrapper pins Gradle 9.6.0 with Loom 1.17.21. Build verification includes JUnit tests for storage, backup/restore, material conservation, imports, project lookup, identity permissions, configuration copies, and chunked board transfers. No server is started by the tests.
 
 Board actions require an open session within eight blocks of the same board in the same dimension. Updates are sent to every valid viewer. Snapshots are transferred in chunks, with a limit of 8,388,608 characters; exceeding the limit reports an error rather than attempting an oversized packet.
 

@@ -2,7 +2,6 @@ package com.clockworktown.campboard.block;
 
 import com.clockworktown.campboard.CampBoardMod;
 import com.clockworktown.campboard.network.BoardSessions;
-import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -29,7 +28,6 @@ import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class CampBoardBlock extends HorizontalDirectionalBlock implements net.minecraft.world.level.block.EntityBlock {
-    public static final MapCodec<CampBoardBlock> CODEC = simpleCodec(CampBoardBlock::new);
     public static final BooleanProperty WALL = BooleanProperty.create("wall");
     public static final BooleanProperty LARGE = BooleanProperty.create("large");
     public static final IntegerProperty PART = IntegerProperty.create("part", 0, 8);
@@ -61,11 +59,6 @@ public class CampBoardBlock extends HorizontalDirectionalBlock implements net.mi
     public CampBoardBlock(Properties properties) {
         super(properties);
         registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(WALL, false).setValue(LARGE, false).setValue(PART, 1));
-    }
-
-    @Override
-    protected MapCodec<? extends HorizontalDirectionalBlock> codec() {
-        return CODEC;
     }
 
     @Override
