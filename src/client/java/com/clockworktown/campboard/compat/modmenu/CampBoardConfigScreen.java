@@ -1,15 +1,28 @@
 package com.clockworktown.campboard.compat.modmenu;
 
-import com.clockworktown.campboard.CampBoardMod;
+import com.clockworktown.campboard.client.BoardClientState;
+import com.clockworktown.campboard.config.CampBoardConfig;
+import com.clockworktown.campboard.network.BoardActionPayload;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 public class CampBoardConfigScreen extends Screen {
-    private static final int TEXT_COLOR = 0xFFFFFFFF;
-    private static final int MUTED_TEXT_COLOR = 0xFFBDBDBD;
     private final Screen parent;
+    private final Map<AbstractWidget, Integer> controls = new LinkedHashMap<>();
+    private CampBoardConfig config;
+    private Button done;
+    private int scroll;
+    private int row;
+    private boolean pending;
 
     public CampBoardConfigScreen(Screen parent) {
         super(Component.literal("Camp Board Config"));
@@ -18,172 +31,112 @@ public class CampBoardConfigScreen extends Screen {
 
     @Override
     protected void init() {
+        refreshConfig();
+        BoardClientState.requestConfig();
+    }
+
+    public void refreshConfig() {
+        config = CampBoardConfig.fromJson(BoardClientState.config().toJson());
+        pending = false;
         rebuild();
     }
 
     private void rebuild() {
         clearWidgets();
-        int center = width / 2;
-        int y = 58;
+        controls.clear();
+        row = 78;
+        toggle("Crafting", config.craftingEnabled(), () -> config.setCraftingEnabled(!config.craftingEnabled()));
+        toggle("All Boards Global", config.allBoardsGlobal(), () -> config.setAllBoardsGlobal(!config.allBoardsGlobal()));
+        toggle("Large Boards", config.largeBoard(), () -> config.setLargeBoard(!config.largeBoard()));
+        toggle("Breakable", config.breakable(), () -> config.setBreakable(!config.breakable()));
+        addControl("Project Creation: " + ("ANYONE".equals(config.projectCreation()) ? "Anyone" : "Admins"),
+                () -> config.setProjectCreation("ANYONE".equals(config.projectCreation()) ? "ADMIN_ONLY" : "ANYONE"));
+        toggle("Suggestions", config.suggestionsEnabled(), () -> config.setSuggestionsEnabled(!config.suggestionsEnabled()));
+        toggle("Materials", config.materialsEnabled(), () -> config.setMaterialsEnabled(!config.materialsEnabled()));
+        toggle("Anyone Can Withdraw", config.anyoneCanWithdrawMaterials(), () -> config.setAnyoneCanWithdrawMaterials(!config.anyoneCanWithdrawMaterials()));
+        toggle("Task Helping", config.taskHelpingEnabled(), () -> config.setTaskHelpingEnabled(!config.taskHelpingEnabled()));
+        stepper("Max Leaders: " + config.maxProjectLeaders(),
+                () -> config.setMaxProjectLeaders(config.maxProjectLeaders() - 1),
+                () -> config.setMaxProjectLeaders(config.maxProjectLeaders() + 1));
+        stepper("Description Length: " + config.maxDescriptionLength(),
+                () -> config.setMaxDescriptionLength(config.maxDescriptionLength() - 25),
+                () -> config.setMaxDescriptionLength(config.maxDescriptionLength() + 25));
+        stepper("Backup Retention: " + config.backupRetention(),
+                () -> config.setBackupRetention(config.backupRetention() - 1),
+                () -> config.setBackupRetention(config.backupRetention() + 1));
+        done = addRenderableWidget(Button.builder(Component.literal("Done"), button -> minecraft.gui.setScreen(parent))
+                .bounds(width / 2 - 50, height - 30, 100, 20).build());
+        layoutControls();
+    }
 
-        addToggle(center, y, craftingLabel(), () -> {
-            CampBoardMod.config().setCraftingEnabled(!CampBoardMod.config().craftingEnabled());
-            saveAndRebuild();
-        });
-        y += 24;
+    private void toggle(String name, boolean enabled, Runnable change) {
+        addControl(name + ": " + (enabled ? "Enabled" : "Disabled"), change);
+    }
 
-        addToggle(center, y, globalLabel(), () -> {
-            CampBoardMod.config().setAllBoardsGlobal(!CampBoardMod.config().allBoardsGlobal());
-            saveAndRebuild();
-        });
-        y += 24;
+    private void addControl(String name, Runnable change) {
+        add(name, width / 2 - controlWidth() / 2, row, controlWidth(), change);
+        row += 26;
+    }
 
-        addToggle(center, y, boardSizeLabel(), () -> {
-            CampBoardMod.config().setLargeBoard(!CampBoardMod.config().largeBoard());
-            saveAndRebuild();
-        });
-        y += 24;
+    private void stepper(String name, Runnable decrease, Runnable increase) {
+        int left = width / 2 - controlWidth() / 2;
+        add("-", left, row, 24, decrease);
+        add(name, left + 28, row, controlWidth() - 56, null);
+        add("+", left + controlWidth() - 24, row, 24, increase);
+        row += 26;
+    }
 
-        addToggle(center, y, breakableLabel(), () -> {
-            CampBoardMod.config().setBreakable(!CampBoardMod.config().breakable());
-            saveAndRebuild();
-        });
-        y += 24;
+    private void add(String name, int x, int y, int w, Runnable change) {
+        Button button = addRenderableWidget(Button.builder(Component.literal(name), pressed -> {
+            if (!BoardClientState.editable() || pending || change == null) return;
+            change.run();
+            JsonObject action = new JsonObject();
+            action.addProperty("type", "update_config");
+            action.addProperty("expectedConfig", BoardClientState.config().toJson());
+            action.add("config", JsonParser.parseString(config.toJson()));
+            ClientPlayNetworking.send(new BoardActionPayload(action.toString()));
+            pending = true;
+            layoutControls();
+        }).bounds(x, y, w, 20).build());
+        button.active = change != null && BoardClientState.editable() && !pending;
+        controls.put(button, y);
+    }
 
-        addToggle(center, y, projectCreationLabel(), () -> {
-            CampBoardMod.config().setProjectCreation("ANYONE".equals(CampBoardMod.config().projectCreation()) ? "ADMIN_ONLY" : "ANYONE");
-            saveAndRebuild();
-        });
-        y += 24;
+    private int controlWidth() { return Math.min(300, width - 24); }
 
-        addToggle(center, y, suggestionsLabel(), () -> {
-            CampBoardMod.config().setSuggestionsEnabled(!CampBoardMod.config().suggestionsEnabled());
-            saveAndRebuild();
-        });
-        y += 24;
+    private void layoutControls() {
+        scroll = Math.max(0, Math.min(scroll, Math.max(0, row - (height - 40))));
+        for (var entry : controls.entrySet()) {
+            var widget = entry.getKey();
+            widget.setY(entry.getValue() - scroll);
+            widget.visible = widget.getY() >= 76 && widget.getY() + widget.getHeight() <= height - 40;
+            if (pending) widget.active = false;
+        }
+    }
 
-        addToggle(center, y, materialsLabel(), () -> {
-            CampBoardMod.config().setMaterialsEnabled(!CampBoardMod.config().materialsEnabled());
-            saveAndRebuild();
-        });
-        y += 24;
-
-        addToggle(center, y, withdrawLabel(), () -> {
-            CampBoardMod.config().setAnyoneCanWithdrawMaterials(!CampBoardMod.config().anyoneCanWithdrawMaterials());
-            saveAndRebuild();
-        });
-        y += 24;
-
-        addToggle(center, y, taskHelpingLabel(), () -> {
-            CampBoardMod.config().setTaskHelpingEnabled(!CampBoardMod.config().taskHelpingEnabled());
-            saveAndRebuild();
-        });
-        y += 28;
-
-        addStepper(center, y, "Max Leaders: " + CampBoardMod.config().maxProjectLeaders(), () -> {
-            CampBoardMod.config().setMaxProjectLeaders(CampBoardMod.config().maxProjectLeaders() - 1);
-            saveAndRebuild();
-        }, () -> {
-            CampBoardMod.config().setMaxProjectLeaders(CampBoardMod.config().maxProjectLeaders() + 1);
-            saveAndRebuild();
-        });
-        y += 26;
-
-        addStepper(center, y, "Description Length: " + CampBoardMod.config().maxDescriptionLength(), () -> {
-            CampBoardMod.config().setMaxDescriptionLength(CampBoardMod.config().maxDescriptionLength() - 25);
-            saveAndRebuild();
-        }, () -> {
-            CampBoardMod.config().setMaxDescriptionLength(CampBoardMod.config().maxDescriptionLength() + 25);
-            saveAndRebuild();
-        });
-        y += 26;
-
-        addStepper(center, y, backupLabel(), () -> {
-            CampBoardMod.config().setBackupRetention(CampBoardMod.config().backupRetention() - 1);
-            saveAndRebuild();
-        }, () -> {
-            CampBoardMod.config().setBackupRetention(CampBoardMod.config().backupRetention() + 1);
-            saveAndRebuild();
-        });
-
-        addRenderableWidget(Button.builder(Component.literal("Done"), button -> minecraft.setScreen(parent))
-                .bounds(center - 50, height - 32, 100, 20)
-                .build());
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (mouseY >= 76 && mouseY < height - 40) {
+            scroll -= (int) Math.signum(scrollY) * 26;
+            layoutControls();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        graphics.fill(0, 0, width, height, 0xD0101010);
-        centeredText(graphics, "Camp Board", width / 2, 24, TEXT_COLOR);
-        centeredText(graphics, "Physical project boards for builds, tasks, suggestions, locations, and shared material needs.", width / 2, 44, MUTED_TEXT_COLOR);
-        centeredText(graphics, "Config is saved to the current world/server when one is loaded.", width / 2, 58, MUTED_TEXT_COLOR);
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+        graphics.fill(0, 0, width, height, 0xEF171717);
+        centered(graphics, "Camp Board", 22);
+        centered(graphics, "Projects, tasks, and shared materials", 40);
+        centered(graphics, !BoardClientState.connected() ? "Server settings unavailable" : BoardClientState.editable() ? "Server Settings" : "Server Settings (Read Only)", 58);
+        graphics.enableScissor(0, 76, width, height - 40);
+        for (var widget : controls.keySet()) widget.extractRenderState(graphics, mouseX, mouseY, partialTick);
+        graphics.disableScissor();
+        done.extractRenderState(graphics, mouseX, mouseY, partialTick);
     }
 
-    private void addToggle(int center, int y, String label, Runnable action) {
-        addRenderableWidget(Button.builder(Component.literal(label), button -> action.run())
-                .bounds(center - 125, y, 250, 20)
-                .build());
-    }
-
-    private void addStepper(int center, int y, String label, Runnable decrease, Runnable increase) {
-        addRenderableWidget(Button.builder(Component.literal("-"), button -> decrease.run())
-                .bounds(center - 125, y, 28, 20)
-                .build());
-        addRenderableWidget(Button.builder(Component.literal(label), button -> {})
-                .bounds(center - 91, y, 182, 20)
-                .build());
-        addRenderableWidget(Button.builder(Component.literal("+"), button -> increase.run())
-                .bounds(center + 97, y, 28, 20)
-                .build());
-    }
-
-    private void saveAndRebuild() {
-        CampBoardMod.saveQuietly();
-        rebuild();
-    }
-
-    private String craftingLabel() {
-        return "Crafting: " + (CampBoardMod.config().craftingEnabled() ? "Enabled" : "Disabled");
-    }
-
-    private String globalLabel() {
-        return "All Boards Global: " + (CampBoardMod.config().allBoardsGlobal() ? "Enabled" : "Disabled");
-    }
-
-    private String boardSizeLabel() {
-        return "Board Size: " + (CampBoardMod.config().largeBoard() ? "Large" : "Standard");
-    }
-
-    private String breakableLabel() {
-        return "Breakable: " + (CampBoardMod.config().breakable() ? "Enabled" : "Command Only");
-    }
-
-    private String projectCreationLabel() {
-        return "Project Creation: " + ("ANYONE".equals(CampBoardMod.config().projectCreation()) ? "Anyone" : "Admin Only");
-    }
-
-    private String suggestionsLabel() {
-        return "Suggestions: " + (CampBoardMod.config().suggestionsEnabled() ? "Enabled" : "Disabled");
-    }
-
-    private String materialsLabel() {
-        return "Materials: " + (CampBoardMod.config().materialsEnabled() ? "Enabled" : "Disabled");
-    }
-
-    private String withdrawLabel() {
-        return "Material Withdrawal: " + (CampBoardMod.config().anyoneCanWithdrawMaterials() ? "Anyone" : "Leaders/Admins");
-    }
-
-    private String taskHelpingLabel() {
-        return "Task Helping: " + (CampBoardMod.config().taskHelpingEnabled() ? "Enabled" : "Disabled");
-    }
-
-    private String backupLabel() {
-        return "Backup Retention: " + CampBoardMod.config().backupRetention();
-    }
-
-    private void centeredText(GuiGraphicsExtractor graphics, String value, int centerX, int y, int color) {
-        graphics.text(font, value, centerX - font.width(value) / 2, y, color, false);
+    private void centered(GuiGraphicsExtractor graphics, String value, int y) {
+        graphics.text(font, value, (width - font.width(value)) / 2, y, 0xFFFFFFFF, false);
     }
 }

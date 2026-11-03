@@ -1,5 +1,7 @@
 package com.clockworktown.campboard.config;
 
+import com.google.gson.Gson;
+
 public class CampBoardConfig {
     private boolean craftingEnabled = true;
     private boolean allBoardsGlobal = false;
@@ -23,7 +25,7 @@ public class CampBoardConfig {
     }
 
     public int backupRetention() {
-        return backupRetention;
+        return Math.max(1, backupRetention);
     }
 
     public boolean suggestionsEnabled() {
@@ -100,6 +102,20 @@ public class CampBoardConfig {
 
     public void setProjectCreation(String projectCreation) {
         this.projectCreation = "ANYONE".equalsIgnoreCase(projectCreation) ? "ANYONE" : "ADMIN_ONLY";
+    }
+
+    public String toJson() {
+        return new Gson().toJson(this);
+    }
+
+    public static CampBoardConfig fromJson(String json) {
+        CampBoardConfig config = new Gson().fromJson(json, CampBoardConfig.class);
+        if (config == null) throw new IllegalArgumentException("Missing config");
+        config.setProjectCreation(config.projectCreation());
+        config.setMaxProjectLeaders(config.maxProjectLeaders());
+        config.setMaxDescriptionLength(config.maxDescriptionLength());
+        config.setBackupRetention(config.backupRetention());
+        return config;
     }
 
     public void setMaxProjectLeaders(int maxProjectLeaders) {

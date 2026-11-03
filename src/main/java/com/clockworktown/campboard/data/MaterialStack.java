@@ -45,6 +45,5 @@ public class MaterialStack {
 
     public void adjustRequested(int amount) {
         requested = Math.max(0, amount);
-        stored = Math.min(stored, requested);
     }
 }

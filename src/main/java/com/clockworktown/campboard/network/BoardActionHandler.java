@@ -1,6 +1,7 @@
 package com.clockworktown.campboard.network;
 
 import com.clockworktown.campboard.CampBoardMod;
+import com.clockworktown.campboard.config.CampBoardConfig;
 import com.clockworktown.campboard.data.BoardLocation;
 import com.clockworktown.campboard.data.BoardState;
 import com.clockworktown.campboard.data.MaterialStack;
@@ -19,9 +20,12 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public final class BoardActionHandler {
     private BoardActionHandler() {
@@ -29,15 +33,66 @@ public final class BoardActionHandler {
 
     public static void handle(BoardActionPayload payload, ServerPlayNetworking.Context context) {
         ServerPlayer player = context.player();
-        JsonObject action = JsonParser.parseString(payload.actionJson()).getAsJsonObject();
-        String boardId = text(action, "boardId");
         try {
-            process(player, action);
-            CampBoardMod.saveBoard(boardId);
+            JsonObject action = JsonParser.parseString(payload.actionJson()).getAsJsonObject();
+            String type = text(action, "type");
+            if ("close_board".equals(type)) { BoardSessions.close(player, text(action, "boardId")); return; }
+            if ("request_config".equals(type)) { BoardSessions.sendConfig(player); return; }
+            if ("update_config".equals(type)) {
+                try {
+                    requireAdmin(player);
+                    if (!text(action, "expectedConfig").equals(CampBoardMod.config().toJson())) {
+                        throw new IllegalArgumentException("Server settings changed. Review the refreshed values and try again.");
+                    }
+                    CampBoardMod.updateConfig(CampBoardConfig.fromJson(action.getAsJsonObject("config").toString()));
+                } finally { BoardSessions.sendConfig(player); }
+                return;
+            }
+            BoardSessions.require(player, text(action, "boardId"));
+            if ("assign_leader".equals(type)) {
+                requireAdmin(player);
+                String identity = text(action, "identity");
+                if (!identity.isBlank() && !identity.matches("[0-9a-fA-F-]{36}")) {
+                    var server = player.level().getServer();
+                    CompletableFuture.supplyAsync(() -> server.services().nameToIdCache().get(identity))
+                            .orTimeout(10, TimeUnit.SECONDS)
+                            .whenComplete((profile, failure) -> server.execute(() -> {
+                                if (failure != null || profile.isEmpty()) {
+                                    player.sendSystemMessage(Component.literal("Player identity could not be resolved. Use a UUID or leave identity empty for display only."));
+                                } else {
+                                    action.addProperty("identity", profile.get().id().toString());
+                                    if (server.getPlayerList().getPlayer(player.getUUID()) == player) execute(player, action);
+                                }
+                            }));
+                    return;
+                }
+            }
+            execute(player, action);
         } catch (Exception exception) {
             player.sendSystemMessage(Component.literal("Camp Board action failed: " + exception.getMessage()));
         }
-        refresh(player, boardId);
+    }
+
+    private static void execute(ServerPlayer player, JsonObject action) {
+        String boardId = text(action, "boardId");
+        BoardState previous = null;
+        List<ItemStack> inventory = new ArrayList<>();
+        try {
+            BoardSessions.require(player, boardId);
+            previous = BoardJson.fromJson(BoardJson.toJson(CampBoardMod.boardState(boardId)));
+            for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++) inventory.add(player.getInventory().getItem(slot).copy());
+            process(player, action);
+            CampBoardMod.saveBoard(boardId);
+        } catch (Exception exception) {
+            if (previous != null) {
+                CampBoardMod.replaceBoard(boardId, previous);
+                for (int slot = 0; slot < inventory.size(); slot++) player.getInventory().setItem(slot, inventory.get(slot));
+                player.getInventory().setChanged();
+                player.containerMenu.broadcastChanges();
+            }
+            player.sendSystemMessage(Component.literal("Camp Board action failed: " + exception.getMessage()));
+        }
+        if (previous != null) BoardSessions.refresh(player.level().getServer(), boardId);
     }
 
     private static void process(ServerPlayer player, JsonObject action) {
@@ -88,7 +143,12 @@ public final class BoardActionHandler {
     private static void setStatus(ServerPlayer player, JsonObject action) {
         Project project = project(action);
         requireEditor(player, project);
-        project.setStatus(ProjectStatus.valueOf(text(action, "status")));
+        ProjectStatus status = ProjectStatus.valueOf(text(action, "status"));
+        if (status == ProjectStatus.ARCHIVED) {
+            requireAdmin(player);
+            requireEmptyMaterials(project);
+        }
+        project.setStatus(status);
         project.log(player.getUUID(), "Changed status to " + project.status().displayName() + ".");
     }
 
@@ -104,6 +164,7 @@ public final class BoardActionHandler {
         Project project = project(action);
         requireEditor(player, project);
         String itemId = text(action, "itemId");
+        item(itemId);
         int requested = integer(action, "requested");
         if (itemId.isBlank() || requested <= 0) {
             throw new IllegalArgumentException("Material item and amount are required.");
@@ -133,11 +194,17 @@ public final class BoardActionHandler {
         }
         MaterialStack material = material(project, action);
         Item item = item(material.itemId());
-        int removed = material.withdraw(integer(action, "amount"));
+        int removed = material.withdraw(Math.min(integer(action, "amount"), inventoryCapacity(player, new ItemStack(item))));
         if (removed > 0) {
-            player.getInventory().placeItemBackInInventory(new ItemStack(item, removed));
+            int remaining = removed;
+            while (remaining > 0) {
+                ItemStack stack = new ItemStack(item, Math.min(remaining, item.getDefaultMaxStackSize()));
+                int count = stack.getCount();
+                if (!player.getInventory().add(stack)) throw new IllegalArgumentException("Not enough inventory space.");
+                remaining -= count;
+            }
             project.log(player.getUUID(), "Withdrew " + removed + " " + material.itemId() + ".");
-        }
+        } else if (material.stored() > 0) throw new IllegalArgumentException("Not enough inventory space.");
     }
 
     private static void addTask(ServerPlayer player, JsonObject action) {
@@ -153,7 +220,8 @@ public final class BoardActionHandler {
         }
         Project project = project(action);
         ProjectTask task = task(project, action);
-        if (task.helpers().contains(player.getUUID())) {
+        boolean helping = action.has("helping") ? action.get("helping").getAsBoolean() : !task.helpers().contains(player.getUUID());
+        if (!helping) {
             task.removeHelper(player.getUUID());
             project.log(player.getUUID(), "Stopped helping task: " + task.title() + ".");
         } else {
@@ -166,7 +234,7 @@ public final class BoardActionHandler {
         Project project = project(action);
         requireEditor(player, project);
         ProjectTask task = task(project, action);
-        task.setCompleted(!task.completed());
+        task.setCompleted(action.has("completed") ? action.get("completed").getAsBoolean() : !task.completed());
         project.log(player.getUUID(), (task.completed() ? "Completed" : "Reopened") + " task: " + task.title() + ".");
     }
 
@@ -184,7 +252,12 @@ public final class BoardActionHandler {
         if (leaderName.isBlank()) {
             throw new IllegalArgumentException("Leader name is required.");
         }
-        UUID leaderId = UUID.nameUUIDFromBytes(("campboard-leader:" + leaderName).getBytes(StandardCharsets.UTF_8));
+        String identity = text(action, "identity");
+        var online = player.level().getServer().getPlayerList().getPlayerByName(leaderName);
+        UUID leaderId = !identity.isBlank() ? UUID.fromString(identity) : online != null ? online.getUUID()
+                : Project.displayLeaderId(leaderName);
+        UUID oldId = Project.displayLeaderId(leaderName);
+        if (!oldId.equals(leaderId)) project.removeLeader(oldId);
         if (!project.addLeader(leaderId, leaderName, CampBoardMod.config().maxProjectLeaders())) {
             throw new IllegalArgumentException("Projects can have at most " + CampBoardMod.config().maxProjectLeaders() + " leader(s).");
         }
@@ -216,6 +289,7 @@ public final class BoardActionHandler {
         requireAdmin(player);
         Suggestion suggestion = suggestion(action);
         Project project = new Project(safeId(suggestion.title()), suggestion.title(), suggestion.description(), player.getUUID());
+        if (state(action).findProject(project.id()).isPresent()) throw new IllegalArgumentException("A project with this ID already exists. Rename or remove it first.");
         project.log(player.getUUID(), "Approved from suggestion.");
         state(action).projects().add(project);
         state(action).suggestions().remove(suggestion);
@@ -229,6 +303,7 @@ public final class BoardActionHandler {
     private static void archiveProject(ServerPlayer player, JsonObject action) {
         requireAdmin(player);
         Project project = project(action);
+        requireEmptyMaterials(project);
         project.setStatus(ProjectStatus.ARCHIVED);
         project.log(player.getUUID(), "Archived project.");
     }
@@ -243,15 +318,11 @@ public final class BoardActionHandler {
         state(action).projects().remove(project);
     }
 
-    private static void refresh(ServerPlayer player, String boardId) {
-        ServerPlayNetworking.send(player, new OpenBoardPayload(boardId, BoardJson.toJson(CampBoardMod.boardState(boardId))));
-    }
-
     private static int removeItems(ServerPlayer player, Item item, int count) {
         int remaining = Math.max(0, count);
         for (int slot = 0; slot < player.getInventory().getContainerSize() && remaining > 0; slot++) {
             ItemStack stack = player.getInventory().getItem(slot);
-            if (!stack.isEmpty() && stack.getItem() == item) {
+            if (!stack.isEmpty() && ItemStack.isSameItemSameComponents(stack, new ItemStack(item))) {
                 int removed = Math.min(remaining, stack.getCount());
                 stack.shrink(removed);
                 remaining -= removed;
@@ -262,11 +333,21 @@ public final class BoardActionHandler {
     }
 
     private static Item item(String itemId) {
-        Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(itemId));
-        if (item == null) {
+        Identifier id = Identifier.parse(itemId);
+        if (!BuiltInRegistries.ITEM.containsKey(id) || "minecraft:air".equals(itemId)) {
             throw new IllegalArgumentException("Unknown item " + itemId);
         }
-        return item;
+        return BuiltInRegistries.ITEM.getValue(id);
+    }
+
+    private static int inventoryCapacity(ServerPlayer player, ItemStack item) {
+        int available = 0;
+        for (int slot = 0; slot < 36; slot++) {
+            ItemStack current = player.getInventory().getItem(slot);
+            if (current.isEmpty()) available += item.getMaxStackSize();
+            else if (ItemStack.isSameItemSameComponents(current, item)) available += Math.max(0, current.getMaxStackSize() - current.getCount());
+        }
+        return available;
     }
 
     private static Project project(JsonObject action) {
@@ -308,8 +389,14 @@ public final class BoardActionHandler {
     }
 
     private static void requireEditor(ServerPlayer player, Project project) {
-        if (!player.level().getServer().getPlayerList().isOp(player.nameAndId()) && !project.leaders().contains(player.getUUID())) {
+        if (!player.level().getServer().getPlayerList().isOp(player.nameAndId()) && !project.canEdit(player.getUUID(), player.nameAndId().name())) {
             throw new IllegalArgumentException("Project leader or admin permission required.");
+        }
+    }
+
+    private static void requireEmptyMaterials(Project project) {
+        if (project.materials().values().stream().anyMatch(material -> material.stored() > 0)) {
+            throw new IllegalArgumentException("Withdraw stored materials before archiving.");
         }
     }
 
