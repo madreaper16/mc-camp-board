@@ -2,6 +2,10 @@ package com.clockworktown.campboard.command;
 
 import com.clockworktown.campboard.CampBoardMod;
 import com.clockworktown.campboard.block.CampBoardBlock;
+import com.clockworktown.campboard.block.CampBoardBlockEntity;
+import com.clockworktown.campboard.config.CampBoardConfig;
+import com.clockworktown.campboard.storage.MaterialListImport;
+import com.clockworktown.campboard.storage.BoardJson;
 import com.clockworktown.campboard.data.MaterialStack;
 import com.clockworktown.campboard.data.Project;
 import com.clockworktown.campboard.data.ProjectStatus;
@@ -26,14 +30,9 @@ import net.minecraft.world.phys.HitResult;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public final class CampBoardCommands {
-    private static final Pattern ITEM_ID_PATTERN = Pattern.compile("([a-z0-9_.-]+:)?[a-z0-9_./-]+");
-    private static final Pattern INTEGER_PATTERN = Pattern.compile("\\d+");
 
     private CampBoardCommands() {
     }
@@ -61,6 +60,11 @@ public final class CampBoardCommands {
                                 .executes(CampBoardCommands::export))
                         .then(Commands.literal("remove")
                                 .executes(CampBoardCommands::removeTargetedBoard))
+                        .then(Commands.literal("boards")
+                                .executes(context -> {
+                                    for (String id : CampBoardMod.knownBoardIds()) context.getSource().sendSuccess(() -> Component.literal(id.isEmpty() ? "legacy" : id), false);
+                                    return 1;
+                                }))
                         .then(Commands.literal("config")
                                 .then(Commands.literal("get")
                                         .then(Commands.argument("key", StringArgumentType.word())
@@ -97,14 +101,18 @@ public final class CampBoardCommands {
                                                                         context,
                                                                         StringArgumentType.getString(context, "projectId"),
                                                                         StringArgumentType.getString(context, "itemId"),
-                                                                        IntegerArgumentType.getInteger(context, "amount")))))))
+                                                                        IntegerArgumentType.getInteger(context, "amount")))
+                                                                .then(Commands.argument("boardId", StringArgumentType.word())
+                                                                        .executes(context -> adjustMaterial(context, StringArgumentType.getString(context, "projectId"), StringArgumentType.getString(context, "itemId"), IntegerArgumentType.getInteger(context, "amount"))))))))
                                 .then(Commands.literal("import")
                                         .then(Commands.argument("projectId", StringArgumentType.word())
                                                 .then(Commands.argument("fileName", StringArgumentType.string())
                                                         .executes(context -> importMaterials(
                                                                 context,
                                                                 StringArgumentType.getString(context, "projectId"),
-                                                                StringArgumentType.getString(context, "fileName")))))))));
+                                                                StringArgumentType.getString(context, "fileName")))
+                                                        .then(Commands.argument("boardId", StringArgumentType.word())
+                                                                .executes(context -> importMaterials(context, StringArgumentType.getString(context, "projectId"), StringArgumentType.getString(context, "fileName"))))))))));
     }
 
     private static boolean isAdmin(CommandSourceStack source) {
@@ -205,29 +213,30 @@ public final class CampBoardCommands {
 
     private static int setConfig(CommandContext<CommandSourceStack> context, String key, String value) {
         try {
+            CampBoardConfig updated = CampBoardConfig.fromJson(CampBoardMod.config().toJson());
             switch (key) {
-                case "craftingEnabled" -> CampBoardMod.config().setCraftingEnabled(Boolean.parseBoolean(value));
-                case "allBoardsGlobal" -> CampBoardMod.config().setAllBoardsGlobal(Boolean.parseBoolean(value));
-                case "suggestionsEnabled" -> CampBoardMod.config().setSuggestionsEnabled(Boolean.parseBoolean(value));
-                case "materialsEnabled" -> CampBoardMod.config().setMaterialsEnabled(Boolean.parseBoolean(value));
-                case "anyoneCanWithdrawMaterials" -> CampBoardMod.config().setAnyoneCanWithdrawMaterials(Boolean.parseBoolean(value));
-                case "taskHelpingEnabled" -> CampBoardMod.config().setTaskHelpingEnabled(Boolean.parseBoolean(value));
-                case "largeBoard" -> CampBoardMod.config().setLargeBoard(Boolean.parseBoolean(value));
-                case "breakable" -> CampBoardMod.config().setBreakable(Boolean.parseBoolean(value));
-                case "projectCreation" -> CampBoardMod.config().setProjectCreation(value);
-                case "maxProjectLeaders" -> CampBoardMod.config().setMaxProjectLeaders(Integer.parseInt(value));
-                case "maxDescriptionLength" -> CampBoardMod.config().setMaxDescriptionLength(Integer.parseInt(value));
-                case "backupRetention" -> CampBoardMod.config().setBackupRetention(Integer.parseInt(value));
+                case "craftingEnabled" -> updated.setCraftingEnabled(parseBoolean(value));
+                case "allBoardsGlobal" -> updated.setAllBoardsGlobal(parseBoolean(value));
+                case "suggestionsEnabled" -> updated.setSuggestionsEnabled(parseBoolean(value));
+                case "materialsEnabled" -> updated.setMaterialsEnabled(parseBoolean(value));
+                case "anyoneCanWithdrawMaterials" -> updated.setAnyoneCanWithdrawMaterials(parseBoolean(value));
+                case "taskHelpingEnabled" -> updated.setTaskHelpingEnabled(parseBoolean(value));
+                case "largeBoard" -> updated.setLargeBoard(parseBoolean(value));
+                case "breakable" -> updated.setBreakable(parseBoolean(value));
+                case "projectCreation" -> updated.setProjectCreation(value);
+                case "maxProjectLeaders" -> updated.setMaxProjectLeaders(Integer.parseInt(value));
+                case "maxDescriptionLength" -> updated.setMaxDescriptionLength(Integer.parseInt(value));
+                case "backupRetention" -> updated.setBackupRetention(Integer.parseInt(value));
                 default -> {
                     context.getSource().sendFailure(Component.literal("Unknown config key: " + key));
                     return 0;
                 }
             }
 
-            CampBoardMod.save();
+            CampBoardMod.updateConfig(updated);
             context.getSource().sendSuccess(() -> Component.literal("Updated " + key + " to " + value + "."), true);
             return 1;
-        } catch (IOException | NumberFormatException exception) {
+        } catch (IOException | IllegalArgumentException exception) {
             context.getSource().sendFailure(Component.literal("Failed to update config: " + exception.getMessage()));
             return 0;
         }
@@ -239,12 +248,11 @@ public final class CampBoardCommands {
             return 0;
         }
 
+        var previous = BoardJson.fromJson(BoardJson.toJson(CampBoardMod.boardState()));
         Project project = new Project(projectId, title, "", actor(context));
         project.log(actor(context), "Created project from command.");
         CampBoardMod.boardState().projects().add(project);
-        CampBoardMod.saveQuietly();
-        context.getSource().sendSuccess(() -> Component.literal("Created project " + projectId + "."), true);
-        return 1;
+        return saveLegacyChange(context, previous, "Created project " + projectId + ".");
     }
 
     private static int listProjects(CommandContext<CommandSourceStack> context) {
@@ -264,11 +272,14 @@ public final class CampBoardCommands {
 
     private static int archiveProject(CommandContext<CommandSourceStack> context, String projectId) {
         return CampBoardMod.boardState().findProject(projectId).map(project -> {
+            if (project.materials().values().stream().anyMatch(material -> material.stored() > 0)) {
+                context.getSource().sendFailure(Component.literal("Withdraw stored materials before archiving."));
+                return 0;
+            }
+            var previous = BoardJson.fromJson(BoardJson.toJson(CampBoardMod.boardState()));
             project.setStatus(ProjectStatus.ARCHIVED);
             project.log(actor(context), "Archived project from command.");
-            CampBoardMod.saveQuietly();
-            context.getSource().sendSuccess(() -> Component.literal("Archived project " + projectId + "."), true);
-            return 1;
+            return saveLegacyChange(context, previous, "Archived project " + projectId + ".");
         }).orElseGet(() -> {
             context.getSource().sendFailure(Component.literal("No project found with id " + projectId + "."));
             return 0;
@@ -288,19 +299,31 @@ public final class CampBoardCommands {
             return 0;
         }
 
+        var previous = BoardJson.fromJson(BoardJson.toJson(CampBoardMod.boardState()));
         CampBoardMod.boardState().projects().remove(project);
-        CampBoardMod.saveQuietly();
-        context.getSource().sendSuccess(() -> Component.literal("Deleted project " + projectId + "."), true);
-        return 1;
+        return saveLegacyChange(context, previous, "Deleted project " + projectId + ".");
+    }
+
+    private static int saveLegacyChange(CommandContext<CommandSourceStack> context, com.clockworktown.campboard.data.BoardState previous, String message) {
+        try {
+            CampBoardMod.saveBoard("");
+            context.getSource().sendSuccess(() -> Component.literal(message), true);
+            return 1;
+        } catch (IOException exception) {
+            CampBoardMod.replaceBoard("", previous);
+            context.getSource().sendFailure(Component.literal("Camp Board data was not saved: " + exception.getMessage()));
+            return 0;
+        }
     }
 
     private static int adjustMaterial(CommandContext<CommandSourceStack> context, String projectId, String itemId, int amount) {
-        CampBoardMod.ProjectMatch match = CampBoardMod.findProject(projectId).orElse(null);
-        if (match == null) {
-            context.getSource().sendFailure(Component.literal("No project found with id " + projectId + "."));
+        CampBoardMod.ProjectMatch match = resolveProject(context, projectId);
+        if (match == null) return 0;
+        var previous = BoardJson.fromJson(BoardJson.toJson(match.state()));
+        if (!isKnownItem(itemId)) {
+            context.getSource().sendFailure(Component.literal("Unknown item: " + itemId));
             return 0;
         }
-
         Project project = match.project();
         MaterialStack material = project.materials().computeIfAbsent(itemId, key -> new MaterialStack(key, amount));
         material.adjustStored(amount);
@@ -308,6 +331,7 @@ public final class CampBoardCommands {
         try {
             CampBoardMod.saveProjectMatch(match);
         } catch (IOException exception) {
+            CampBoardMod.replaceBoard(match.boardId(), previous);
             context.getSource().sendFailure(Component.literal("Failed to save material adjustment: " + exception.getMessage()));
             return 0;
         }
@@ -316,14 +340,11 @@ public final class CampBoardCommands {
     }
 
     private static int importMaterials(CommandContext<CommandSourceStack> context, String projectId, String fileName) {
-        CampBoardMod.ProjectMatch match = CampBoardMod.findProject(projectId).orElse(null);
-        if (match == null) {
-            context.getSource().sendFailure(Component.literal("No project found with id " + projectId + "."));
-            return 0;
-        }
-
+        CampBoardMod.ProjectMatch match = resolveProject(context, projectId);
+        if (match == null) return 0;
+        var previous = BoardJson.fromJson(BoardJson.toJson(match.state()));
         Project project = match.project();
-        Path imports = CampBoardMod.importDirectory(context.getSource().getServer()).normalize();
+        Path imports = CampBoardMod.importDirectory(context.getSource().getServer()).toAbsolutePath().normalize();
         Path file = imports.resolve(fileName).normalize();
         if (!file.startsWith(imports)) {
             context.getSource().sendFailure(Component.literal("Import file must be inside serverconfig/campboard/imports."));
@@ -331,22 +352,24 @@ public final class CampBoardCommands {
         }
 
         try {
-            List<String> lines = Files.readAllLines(file);
-            int imported = 0;
-            for (String line : lines) {
-                MaterialRequest request = parseMaterialLine(line);
-                if (request != null) {
-                    MaterialStack material = project.materials().computeIfAbsent(request.itemId(), key -> new MaterialStack(key, 0));
-                    material.adjustRequested(material.requested() + request.amount());
-                    imported++;
-                }
+            if (!file.toRealPath().startsWith(imports.toRealPath()) || Files.size(file) > 4 * 1024 * 1024) throw new IOException("Invalid import path or file exceeds 4 MiB.");
+            var requests = MaterialListImport.parse(Files.readAllLines(file), CampBoardCommands::isKnownItem);
+            for (var request : requests.entrySet()) {
+                MaterialStack material = project.materials().get(request.getKey());
+                Math.addExact(material == null ? 0 : material.requested(), request.getValue());
             }
+            for (var request : requests.entrySet()) {
+                MaterialStack material = project.materials().computeIfAbsent(request.getKey(), key -> new MaterialStack(key, 0));
+                material.adjustRequested(Math.addExact(material.requested(), request.getValue()));
+            }
+            int imported = requests.size();
             project.log(actor(context), "Imported " + imported + " material request(s) from " + file.getFileName() + ".");
             CampBoardMod.saveProjectMatch(match);
             int importedCount = imported;
             context.getSource().sendSuccess(() -> Component.literal("Imported " + importedCount + " material request(s) for " + projectId + "."), true);
             return importedCount;
-        } catch (IOException exception) {
+        } catch (IOException | RuntimeException exception) {
+            CampBoardMod.replaceBoard(match.boardId(), previous);
             context.getSource().sendFailure(Component.literal("Failed to import materials: " + exception.getMessage()));
             return 0;
         }
@@ -384,35 +407,36 @@ public final class CampBoardCommands {
         return 1;
     }
 
-    private static MaterialRequest parseMaterialLine(String rawLine) {
-        String line = rawLine.split("#", 2)[0].trim().toLowerCase();
-        if (line.isBlank()) {
-            return null;
-        }
+    private static boolean isKnownItem(String itemId) {
+        Identifier id = Identifier.tryParse(itemId);
+        return id != null && !"minecraft:air".equals(itemId) && BuiltInRegistries.ITEM.containsKey(id);
+    }
 
-        Matcher amountMatcher = INTEGER_PATTERN.matcher(line);
-        if (!amountMatcher.find()) {
-            return null;
-        }
+    private static boolean parseBoolean(String value) {
+        if (!"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value)) throw new IllegalArgumentException("Expected true or false.");
+        return Boolean.parseBoolean(value);
+    }
 
-        int amount = Integer.parseInt(amountMatcher.group());
-        Matcher itemMatcher = ITEM_ID_PATTERN.matcher(line);
-        while (itemMatcher.find()) {
-            String candidate = normalizeItemId(itemMatcher.group());
-            if (isKnownItem(candidate)) {
-                return new MaterialRequest(candidate, amount);
+    private static CampBoardMod.ProjectMatch resolveProject(CommandContext<CommandSourceStack> context, String projectId) {
+        try {
+            String boardId = null;
+            try { boardId = StringArgumentType.getString(context, "boardId"); }
+            catch (IllegalArgumentException ignored) { }
+            if ("legacy".equals(boardId)) boardId = "";
+            ServerPlayer player = context.getSource().getPlayer();
+            if (boardId == null && player != null) {
+                var hit = player.pick(6, 0, false);
+                if (hit instanceof BlockHitResult block && player.level().getBlockEntity(block.getBlockPos()) instanceof CampBoardBlockEntity entity) {
+                    boardId = CampBoardMod.config().allBoardsGlobal() ? "global" : entity.boardId(player.level());
+                }
             }
+            var found = boardId == null ? CampBoardMod.findProject(projectId) : CampBoardMod.findProject(projectId, boardId);
+            if (found.isPresent()) return found.get();
+            context.getSource().sendFailure(Component.literal("No project found with id " + projectId + " on the selected board."));
+        } catch (RuntimeException exception) {
+            context.getSource().sendFailure(Component.literal(exception.getMessage()));
         }
         return null;
-    }
-
-    private static String normalizeItemId(String value) {
-        String itemId = value.replace('/', '_');
-        return itemId.contains(":") ? itemId : "minecraft:" + itemId;
-    }
-
-    private static boolean isKnownItem(String itemId) {
-        return BuiltInRegistries.ITEM.containsKey(Identifier.parse(itemId));
     }
 
     private static UUID actor(CommandContext<CommandSourceStack> context) {
@@ -420,6 +444,4 @@ public final class CampBoardCommands {
         return player == null ? new UUID(0L, 0L) : player.getUUID();
     }
 
-    private record MaterialRequest(String itemId, int amount) {
-    }
 }

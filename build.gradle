@@ -49,6 +49,8 @@ loom {
 }
 
 dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.12.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.12.2'
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
@@ -57,6 +59,10 @@ dependencies {
     runtimeOnly "mezz.jei:jei-${project.minecraft_version}-fabric:${project.jei_version}"
     compileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
     runtimeOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
+}
+
+test {
+    useJUnitPlatform()
 }
 
 processResources {

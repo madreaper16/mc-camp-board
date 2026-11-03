@@ -1,6 +1,5 @@
 package com.clockworktown.campboard.client;
 
-import com.clockworktown.campboard.CampBoardMod;
 import com.clockworktown.campboard.data.ActivityEntry;
 import com.clockworktown.campboard.data.BoardLocation;
 import com.clockworktown.campboard.data.BoardState;
@@ -15,6 +14,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
@@ -25,6 +25,8 @@ import org.lwjgl.glfw.GLFW;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class CampBoardScreen extends Screen {
     private static final int PANEL_COLOR = 0xFFF1DCA8;
@@ -36,9 +38,6 @@ public class CampBoardScreen extends Screen {
     private static final int TEXT_COLOR = 0xFF2B1B10;
     private static final int MUTED_TEXT_COLOR = 0xFF5F4932;
     private static final int DIVIDER_COLOR = 0xFFB7833A;
-    private static final int TAB_COLOR = 0xFFE4BE72;
-    private static final int ACTIVE_TAB_COLOR = 0xFFFFE3A8;
-    private static final int TAB_BORDER = 0xFF6B421F;
 
     private final String boardId;
     private BoardState boardState;
@@ -49,11 +48,13 @@ public class CampBoardScreen extends Screen {
     private String selectedMaterialId;
     private String transferType;
     private DetailPage detailPage = DetailPage.INFO;
-    private int materialScroll;
-    private int taskScroll;
     private EditBox materialItemField;
     private List<String> materialSuggestions = List.of();
     private final List<EditBox> fields = new ArrayList<>();
+    private final List<AbstractWidget> fixedWidgets = new ArrayList<>();
+    private final Map<AbstractWidget, Integer> contentWidgets = new LinkedHashMap<>();
+    private boolean buildingContent;
+    private int scrollOffset;
 
     public CampBoardScreen(String boardId, BoardState boardState) {
         super(Component.translatable("screen.camp_board.title"));
@@ -65,6 +66,9 @@ public class CampBoardScreen extends Screen {
         if (!this.boardId.equals(boardId)) {
             return;
         }
+        List<String> draft = mode == Mode.LIST ? List.of() : fields.stream().map(EditBox::getValue).toList();
+        int focused = -1;
+        for (int index = 0; index < fields.size(); index++) if (fields.get(index).isFocused()) focused = index;
         this.boardState = boardState;
         if (selectedProjectId != null && findProject(selectedProjectId) == null) {
             selectedProjectId = null;
@@ -74,8 +78,20 @@ public class CampBoardScreen extends Screen {
             selectedSuggestionId = null;
             mode = Mode.LIST;
         }
-        clampScrollOffsets();
         rebuild();
+        for (int index = 0; index < Math.min(draft.size(), fields.size()); index++) fields.get(index).setValue(draft.get(index));
+        if (focused >= 0 && focused < fields.size()) setFocused(fields.get(focused));
+    }
+
+    public String boardId() { return boardId; }
+
+    @Override
+    public void removed() {
+        if (BoardClientState.connected()) {
+            JsonObject close = base("close_board");
+            ClientPlayNetworking.send(new BoardActionPayload(close.toString()));
+        }
+        super.removed();
     }
 
     @Override
@@ -85,16 +101,20 @@ public class CampBoardScreen extends Screen {
 
     private void rebuild() {
         clearWidgets();
+        fixedWidgets.clear();
+        contentWidgets.clear();
+        buildingContent = false;
         fields.clear();
         materialItemField = null;
         materialSuggestions = List.of();
         int left = panelLeft();
         int top = panelTop();
         int width = panelWidth();
-        int tabLeft = left + (width - 324) / 2;
-        addButton("Projects", tabLeft, top + 44, 96, 24, () -> switchTab(Tab.PROJECTS));
-        addButton("Suggestions", tabLeft + 104, top + 44, 116, 24, () -> switchTab(Tab.SUGGESTIONS));
-        addButton("Archive", tabLeft + 228, top + 44, 96, 24, () -> switchTab(Tab.ARCHIVE));
+        int tabWidth = (width - 32) / 3;
+        addButton("Projects", left + 8, top + 44, tabWidth, 24, () -> switchTab(Tab.PROJECTS));
+        addButton("Suggestions", left + 16 + tabWidth, top + 44, tabWidth, 24, () -> switchTab(Tab.SUGGESTIONS));
+        addButton("Archive", left + 24 + tabWidth * 2, top + 44, tabWidth, 24, () -> switchTab(Tab.ARCHIVE));
+        buildingContent = true;
 
         if (mode == Mode.LIST) {
             if (selectedProjectId != null) {
@@ -107,6 +127,17 @@ public class CampBoardScreen extends Screen {
         } else {
             addFormWidgets(left, top, width);
         }
+        int footerX = left + 8;
+        int footerY = top + panelHeight() + 6;
+        int rowY = footerY;
+        for (AbstractWidget widget : fixedWidgets) {
+            if (widget.getY() < footerY) continue;
+            if (footerX + widget.getWidth() > left + width - 8) { footerX = left + 8; rowY += 24; }
+            widget.setX(footerX);
+            widget.setY(rowY);
+            footerX += widget.getWidth() + 6;
+        }
+        layoutContent();
     }
 
     private void addListButtons(int left, int top, int width) {
@@ -138,13 +169,13 @@ public class CampBoardScreen extends Screen {
             EditBox id = field(x, y, 130, "project_id"); y += 30;
             EditBox title = field(x, y, 240, "Title"); y += 30;
             EditBox description = field(x, y, 300, "Description");
-            description.setMaxLength(CampBoardMod.config().maxDescriptionLength());
+            description.setMaxLength(BoardClientState.config().maxDescriptionLength());
             addButton("Save", left + width - 72, top + 224, 56, 20, () -> sendProjectForm(id.getValue(), title.getValue(), description.getValue()));
             addButton("Cancel", left + width - 136, top + 224, 56, 20, this::backToList);
         } else if (mode == Mode.SUGGESTION_FORM) {
             EditBox title = field(x, y, 240, "Title"); y += 30;
             EditBox description = field(x, y, 300, "Description");
-            description.setMaxLength(CampBoardMod.config().maxDescriptionLength());
+            description.setMaxLength(BoardClientState.config().maxDescriptionLength());
             addButton("Submit", left + width - 72, top + 224, 56, 20, () -> sendSuggestionForm(title.getValue(), description.getValue()));
             addButton("Cancel", left + width - 136, top + 224, 56, 20, this::backToList);
         } else if (mode == Mode.MATERIAL_FORM) {
@@ -186,7 +217,11 @@ public class CampBoardScreen extends Screen {
             addButton("Cancel", left + width - 136, top + 224, 56, 20, () -> openProject(selectedProjectId));
         } else if (mode == Mode.LEADER_FORM) {
             EditBox name = field(x, y, 160, "Leader name");
-            addButton("Assign", left + width - 72, top + 224, 56, 20, () -> action("assign_leader", selectedProjectId, object -> object.addProperty("player", name.getValue())));
+            EditBox identity = field(x, y + 36, 260, "Minecraft name or UUID");
+            addButton("Assign", left + width - 72, top + 224, 56, 20, () -> action("assign_leader", selectedProjectId, object -> {
+                object.addProperty("player", name.getValue());
+                object.addProperty("identity", identity.getValue());
+            }));
             addButton("Cancel", left + width - 136, top + 224, 56, 20, () -> openProject(selectedProjectId));
         } else if (mode == Mode.STATUS_FORM) {
             int buttonY = y;
@@ -211,16 +246,23 @@ public class CampBoardScreen extends Screen {
         graphics.fill(left, top, left + width, top + height, PANEL_COLOR);
         drawHeader(graphics, left, top, width);
         centeredText(graphics, title.getString(), this.width / 2, top + 8, 0xFFFFF2D0);
-        drawTabs(graphics, left + (width - 324) / 2, top + 44);
         graphics.fill(left, top + 78, left + width, top + 81, DIVIDER_COLOR);
-
+        graphics.enableScissor(left + 4, contentTop(), left + width - 4, contentBottom());
         if (mode == Mode.LIST) {
-            drawList(graphics, left + 16, top + 88, width - 32);
+            drawList(graphics, left + 16, top + 88 - scrollOffset, width - 32);
         } else {
-            drawForm(graphics, left + 16, top + 88);
+            drawForm(graphics, left + 16, top + 88 - scrollOffset);
         }
+        for (var widget : contentWidgets.keySet()) widget.extractRenderState(graphics, mouseX, mouseY, partialTick);
         drawMaterialSuggestions(graphics);
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+        graphics.disableScissor();
+        for (var widget : fixedWidgets) widget.extractRenderState(graphics, mouseX, mouseY, partialTick);
+        if (maxContentScroll() > 0) {
+            int track = contentBottom() - contentTop();
+            int thumb = Math.max(12, track * track / (track + maxContentScroll()));
+            int y = contentTop() + (track - thumb) * scrollOffset / maxContentScroll();
+            graphics.fill(left + width - 5, y, left + width - 3, y + thumb, DIVIDER_COLOR);
+        }
     }
 
     private void drawList(GuiGraphicsExtractor graphics, int left, int top, int width) {
@@ -241,8 +283,8 @@ public class CampBoardScreen extends Screen {
     private void drawProjectDetail(GuiGraphicsExtractor graphics, int left, int top, int width) {
         Project project = findProject(selectedProjectId);
         if (project == null) return;
-        text(graphics, project.title() + " [" + project.status().displayName() + "]", left, top, HEADER_TEXT);
-        text(graphics, "Leaders: " + leaderText(project), left + width - 150, top, MUTED_TEXT_COLOR);
+        text(graphics, fit(project.title() + " [" + project.status().displayName() + "]", width), left, top, HEADER_TEXT);
+        text(graphics, fit("Leaders: " + leaderText(project), width), left, top + 14, MUTED_TEXT_COLOR);
         if (detailPage == DetailPage.INFO) {
             drawInfoPage(graphics, left, top + 28, width, project);
         } else if (detailPage == DetailPage.MATERIALS) {
@@ -252,17 +294,23 @@ public class CampBoardScreen extends Screen {
         }
         if (!project.activity().isEmpty()) {
             ActivityEntry entry = project.activity().get(project.activity().size() - 1);
-            text(graphics, "Last: " + entry.action(), left, top + 176, MUTED_TEXT_COLOR);
+            int rows = detailPage == DetailPage.MATERIALS ? visibleMaterials(project).size() : project.tasks().size();
+            int lastY = detailPage == DetailPage.INFO ? top + 108 : top + 76 + rows * 42;
+            text(graphics, fit("Last: " + entry.action(), width), left, lastY, MUTED_TEXT_COLOR);
         }
     }
 
     private void drawInfoPage(GuiGraphicsExtractor graphics, int left, int top, int width, Project project) {
-        text(graphics, project.description().isBlank() ? "No description." : project.description(), left, top, TEXT_COLOR);
+        int lineY = top;
+        for (var line : font.split(Component.literal(project.description().isBlank() ? "No description." : project.description()), width)) {
+            graphics.text(font, line, left, lineY, TEXT_COLOR, false);
+            lineY += 10;
+        }
         BoardLocation loc = project.primaryLocation();
         if (loc != null) {
             BoardLocation pair = loc.convertedPair();
-            text(graphics, loc.dimension() + ": " + loc.x() + ", " + loc.y() + ", " + loc.z(), left, top + 18, MUTED_TEXT_COLOR);
-            text(graphics, pair.dimension() + ": " + pair.x() + ", " + pair.y() + ", " + pair.z(), left, top + 30, MUTED_TEXT_COLOR);
+            text(graphics, fit(loc.dimension() + ": " + loc.x() + ", " + loc.y() + ", " + loc.z(), width), left, lineY + 8, MUTED_TEXT_COLOR);
+            text(graphics, fit(pair.dimension() + ": " + pair.x() + ", " + pair.y() + ", " + pair.z(), width), left, lineY + 20, MUTED_TEXT_COLOR);
         }
     }
 
@@ -271,7 +319,7 @@ public class CampBoardScreen extends Screen {
         text(graphics, "Materials", left, y, HEADER_TEXT);
         y += 24;
         List<MaterialStack> materials = visibleMaterials(project);
-        for (MaterialStack material : materials.stream().skip(materialScroll).limit(visibleDetailRows()).toList()) {
+        for (MaterialStack material : materials) {
             text(graphics, fit(material.itemId() + " " + material.stored() + "/" + material.requested(), width - 24), left, y, TEXT_COLOR);
             y += 42;
         }
@@ -282,7 +330,7 @@ public class CampBoardScreen extends Screen {
         text(graphics, "Tasks", left, y, HEADER_TEXT);
         y += 24;
         List<ProjectTask> tasks = project.tasks();
-        for (ProjectTask task : tasks.stream().skip(taskScroll).limit(visibleDetailRows()).toList()) {
+        for (ProjectTask task : tasks) {
             text(graphics, fit((task.completed() ? "[x] " : "[ ] ") + task.title() + " (" + task.helpers().size() + " helping)", width - 24), left, y, TEXT_COLOR);
             y += 42;
         }
@@ -292,8 +340,12 @@ public class CampBoardScreen extends Screen {
         Suggestion suggestion = findSuggestion(selectedSuggestionId);
         if (suggestion == null) return;
         text(graphics, suggestion.title(), left, top, HEADER_TEXT);
-        text(graphics, suggestion.description().isBlank() ? "No description." : suggestion.description(), left, top + 14, TEXT_COLOR);
-        text(graphics, suggestion.supporters().size() + " supporter(s)", left, top + 30, MUTED_TEXT_COLOR);
+        int y = top + 14;
+        for (var line : font.split(Component.literal(suggestion.description().isBlank() ? "No description." : suggestion.description()), width)) {
+            graphics.text(font, line, left, y, TEXT_COLOR, false);
+            y += 10;
+        }
+        text(graphics, suggestion.supporters().size() + " supporter(s)", left, y + 8, MUTED_TEXT_COLOR);
     }
 
     private void drawForm(GuiGraphicsExtractor graphics, int left, int top) {
@@ -332,20 +384,21 @@ public class CampBoardScreen extends Screen {
             text(graphics, "Coordinates", left, y + 30, MUTED_TEXT_COLOR);
         } else if (mode == Mode.LEADER_FORM) {
             text(graphics, "Leader name", left, y, MUTED_TEXT_COLOR);
+            text(graphics, "Player identity (optional)", left, y + 36, MUTED_TEXT_COLOR);
         }
     }
 
     private void openProject(String projectId) {
+        scrollOffset = 0;
         selectedProjectId = projectId;
         selectedSuggestionId = null;
         mode = Mode.LIST;
         detailPage = DetailPage.INFO;
-        materialScroll = 0;
-        taskScroll = 0;
         rebuild();
     }
 
     private void openSuggestion(String suggestionId) {
+        scrollOffset = 0;
         selectedSuggestionId = suggestionId;
         selectedProjectId = null;
         mode = Mode.LIST;
@@ -353,6 +406,7 @@ public class CampBoardScreen extends Screen {
     }
 
     private void addProjectDetailButtons(int left, int top, int width) {
+        buildingContent = false;
         int footerY = top + panelHeight() + 6;
         addButton("Back", left + 16, footerY, 44, 20, this::backToList);
         Project project = findProject(selectedProjectId);
@@ -361,41 +415,42 @@ public class CampBoardScreen extends Screen {
         addButton("Info", left + 68, footerY, 42, 20, () -> switchDetailPage(DetailPage.INFO));
         addButton("Materials", left + 118, footerY, 68, 20, () -> switchDetailPage(DetailPage.MATERIALS));
         addButton("Tasks", left + 194, footerY, 50, 20, () -> switchDetailPage(DetailPage.TASKS));
+        if (readOnly && BoardClientState.editable()) {
+            addButton("Status", left + 252, footerY, 54, 20, () -> openForm(Mode.STATUS_FORM, selectedProjectId, null));
+            addButton("Delete", left + width - 66, top + 3, 54, 18, () -> action("delete_project", selectedProjectId, object -> {}));
+        }
         if (!readOnly) {
             addButton("Archive", left + 8, top + 3, 58, 18, () -> action("archive_project", selectedProjectId, object -> {}));
             addButton("Delete", left + width - 66, top + 3, 54, 18, () -> action("delete_project", selectedProjectId, object -> {}));
             if (detailPage == DetailPage.INFO) {
                 addButton("Status", left + 252, footerY, 54, 20, () -> openForm(Mode.STATUS_FORM, selectedProjectId, null));
                 addButton("Location", left + 314, footerY, 62, 20, () -> openForm(Mode.LOCATION_FORM, selectedProjectId, null));
-                addButton("Leader", left + 252, footerY + 24, 54, 18, () -> openForm(Mode.LEADER_FORM, selectedProjectId, null));
+                addButton("Leader", left + 16, footerY + 24, 54, 18, () -> openForm(Mode.LEADER_FORM, selectedProjectId, null));
             } else if (detailPage == DetailPage.MATERIALS) {
                 addButton("Add Material", left + 252, footerY, 92, 20, () -> openForm(Mode.MATERIAL_FORM, selectedProjectId, null));
             } else if (detailPage == DetailPage.TASKS) {
                 addButton("Add Task", left + 252, footerY, 70, 20, () -> openForm(Mode.TASK_FORM, selectedProjectId, null));
             }
         }
+        buildingContent = true;
         if (detailPage == DetailPage.MATERIALS) {
             List<MaterialStack> materials = visibleMaterials(project);
-            clampMaterialScroll(materials.size());
-            int start = materialScroll;
             int y = top + 158;
-            for (MaterialStack material : materials.stream().skip(start).limit(visibleDetailRows()).toList()) {
+            for (MaterialStack material : materials) {
                 String itemId = material.itemId();
+                addButton("-", left + 8, y, 16, 12, () -> openTransfer("withdraw", itemId));
                 if (!readOnly) {
-                    addButton("-", left + 8, y, 16, 12, () -> openTransfer("withdraw", itemId));
                     addButton("+", left + 30, y, 16, 12, () -> openTransfer("contribute", itemId));
                 }
                 y += 42;
             }
         } else if (detailPage == DetailPage.TASKS) {
             List<ProjectTask> tasks = project.tasks();
-            clampTaskScroll(tasks.size());
-            int start = taskScroll;
             int y = top + 158;
-            for (ProjectTask task : tasks.stream().skip(start).limit(visibleDetailRows()).toList()) {
+            for (ProjectTask task : tasks) {
                 if (!readOnly) {
-                    addButton("Help", left + 8, y, 28, 12, () -> taskAction("toggle_help", task.id(), null));
-                    addButton("Done", left + 42, y, 28, 12, () -> taskAction("complete_task", task.id(), null));
+                    addButton("Help", left + 16, y, 34, 14, () -> taskAction("toggle_help", task.id(), null));
+                    addButton("Done", left + 56, y, 36, 14, () -> taskAction("complete_task", task.id(), null));
                 }
                 y += 42;
             }
@@ -403,6 +458,8 @@ public class CampBoardScreen extends Screen {
     }
 
     private void addSuggestionDetailButtons(int left, int top) {
+        buildingContent = false;
+        top = panelTop() + panelHeight() + 6 - 202;
         addButton("Back", left + 16, top + 202, 44, 20, this::backToList);
         addButton("Support", left + 68, top + 202, 62, 20, () -> suggestionAction("support_suggestion"));
         addButton("Approve", left + 138, top + 202, 62, 20, () -> suggestionAction("approve_suggestion"));
@@ -415,6 +472,7 @@ public class CampBoardScreen extends Screen {
     }
 
     private void backToList() {
+        scrollOffset = 0;
         selectedProjectId = null;
         selectedSuggestionId = null;
         mode = Mode.LIST;
@@ -422,6 +480,7 @@ public class CampBoardScreen extends Screen {
     }
 
     private void openForm(Mode next, String projectId, String suggestionId) {
+        scrollOffset = 0;
         mode = next;
         selectedProjectId = projectId;
         selectedSuggestionId = suggestionId;
@@ -435,8 +494,8 @@ public class CampBoardScreen extends Screen {
     }
 
     private void switchDetailPage(DetailPage page) {
+        scrollOffset = 0;
         detailPage = page;
-        clampScrollOffsets();
         rebuild();
     }
 
@@ -460,6 +519,10 @@ public class CampBoardScreen extends Screen {
     private void taskAction(String type, String taskId, UUID helper) {
         action(type, selectedProjectId, object -> {
             object.addProperty("taskId", taskId);
+            Project project = findProject(selectedProjectId);
+            ProjectTask task = project.tasks().stream().filter(value -> value.id().equals(taskId)).findFirst().orElseThrow();
+            if ("complete_task".equals(type)) object.addProperty("completed", !task.completed());
+            if ("toggle_help".equals(type)) object.addProperty("helping", !task.helpers().contains(minecraft.player.getUUID()));
             if (helper != null) object.addProperty("helper", helper.toString());
         });
     }
@@ -492,34 +555,61 @@ public class CampBoardScreen extends Screen {
     }
 
     private EditBox field(int x, int y, int width, String hint) {
-        EditBox field = new EditBox(font, x, y, width, 18, Component.literal(hint));
+        EditBox field = new EditBox(font, x, y, Math.max(20, Math.min(width, panelLeft() + panelWidth() - 16 - x)), 18, Component.literal(hint));
         field.setHint(Component.literal(hint));
+        field.setMaxLength(256);
         field.setTextShadow(false);
-        addRenderableWidget(field);
+        track(field, true);
         fields.add(field);
         return field;
     }
 
     private void addButton(String label, int x, int y, int width, int height, Runnable action) {
-        addRenderableWidget(Button.builder(Component.literal(label), button -> action.run()).bounds(x, y, width, height).build());
+        boolean formFooter = mode != Mode.LIST && List.of("Save", "Cancel", "Assign", "Confirm", "Submit").contains(label);
+        if (formFooter) y = panelTop() + panelHeight() + 6;
+        int right = panelLeft() + panelWidth() - 8;
+        x = Math.min(x, right - width);
+        track(Button.builder(Component.literal(fit(label, width - 6)), button -> action.run()).bounds(x, y, width, height).build(), buildingContent && !formFooter);
+    }
+
+    private void track(AbstractWidget widget, boolean content) {
+        addRenderableWidget(widget);
+        if (content) contentWidgets.put(widget, widget.getY());
+        else fixedWidgets.add(widget);
+    }
+
+    private int contentTop() { return panelTop() + 84; }
+    private int contentBottom() { return panelTop() + panelHeight() - 4; }
+
+    private int maxContentScroll() {
+        int bottom = contentTop();
+        for (var entry : contentWidgets.entrySet()) bottom = Math.max(bottom, entry.getValue() + entry.getKey().getHeight() + 8);
+        if (mode == Mode.LIST && selectedProjectId != null) {
+            Project project = findProject(selectedProjectId);
+            if (project != null) {
+                int rows = detailPage == DetailPage.MATERIALS ? visibleMaterials(project).size() : project.tasks().size();
+                bottom = Math.max(bottom, panelTop() + (detailPage == DetailPage.INFO ? 260 : 180 + rows * 42));
+            }
+        }
+        if (mode == Mode.LIST && selectedSuggestionId != null) bottom = Math.max(bottom, panelTop() + 210);
+        return Math.max(0, bottom - contentBottom());
+    }
+
+    private void layoutContent() {
+        scrollOffset = Math.max(0, Math.min(scrollOffset, maxContentScroll()));
+        for (var entry : contentWidgets.entrySet()) {
+            AbstractWidget widget = entry.getKey();
+            widget.setY(entry.getValue() - scrollOffset);
+            widget.visible = widget.getY() >= contentTop() && widget.getY() + widget.getHeight() <= contentBottom();
+        }
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (mode == Mode.LIST && selectedProjectId != null) {
-            Project project = findProject(selectedProjectId);
-            if (project != null && detailPage == DetailPage.MATERIALS) {
-                materialScroll -= (int) Math.signum(scrollY);
-                clampMaterialScroll(visibleMaterials(project).size());
-                rebuild();
-                return true;
-            }
-            if (project != null && detailPage == DetailPage.TASKS) {
-                taskScroll -= (int) Math.signum(scrollY);
-                clampTaskScroll(project.tasks().size());
-                rebuild();
-                return true;
-            }
+        if (mouseY >= contentTop() && mouseY <= contentBottom()) {
+            scrollOffset -= (int) Math.signum(scrollY) * 28;
+            layoutContent();
+            return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
@@ -550,7 +640,7 @@ public class CampBoardScreen extends Screen {
 
     private List<MaterialStack> visibleMaterials(Project project) {
         return project.materials().values().stream()
-                .filter(material -> material.requested() > 0 && material.itemId() != null && !material.itemId().isBlank())
+                .filter(material -> (material.requested() > 0 || material.stored() > 0) && material.itemId() != null && !material.itemId().isBlank())
                 .toList();
     }
 
@@ -578,33 +668,6 @@ public class CampBoardScreen extends Screen {
                 .orElse("None");
     }
 
-    private int visibleDetailRows() {
-        return 3;
-    }
-
-    private void clampScrollOffsets() {
-        Project project = findProject(selectedProjectId);
-        if (project == null) {
-            materialScroll = 0;
-            taskScroll = 0;
-            return;
-        }
-        clampMaterialScroll(visibleMaterials(project).size());
-        clampTaskScroll(project.tasks().size());
-    }
-
-    private void clampMaterialScroll(int size) {
-        materialScroll = Math.max(0, Math.min(materialScroll, maxScroll(size)));
-    }
-
-    private void clampTaskScroll(int size) {
-        taskScroll = Math.max(0, Math.min(taskScroll, maxScroll(size)));
-    }
-
-    private int maxScroll(int size) {
-        return Math.max(0, size - visibleDetailRows());
-    }
-
     private String fit(String value, int maxWidth) {
         if (font.width(value) <= maxWidth) {
             return value;
@@ -625,19 +688,6 @@ public class CampBoardScreen extends Screen {
         graphics.fill(left, top + 12, left + panelWidth, top + 16, HEADER_BAR);
         graphics.fill(left, top + 16, left + panelWidth, top + 20, HEADER_BAR);
         graphics.fill(left, top + 20, left + panelWidth, top + 24, HEADER_BAR_DARK);
-    }
-
-    private void drawTabs(GuiGraphicsExtractor graphics, int left, int top) {
-        drawTab(graphics, Tab.PROJECTS, left, top, 96);
-        drawTab(graphics, Tab.SUGGESTIONS, left + 104, top, 116);
-        drawTab(graphics, Tab.ARCHIVE, left + 228, top, 96);
-    }
-
-    private void drawTab(GuiGraphicsExtractor graphics, Tab target, int left, int top, int tabWidth) {
-        int fillColor = tab == target ? ACTIVE_TAB_COLOR : TAB_COLOR;
-        graphics.fill(left, top, left + tabWidth, top + 24, TAB_BORDER);
-        graphics.fill(left + 2, top + 2, left + tabWidth - 2, top + 22, fillColor);
-        centeredText(graphics, target.label(), left + tabWidth / 2, top + 8, HEADER_TEXT);
     }
 
     private void text(GuiGraphicsExtractor graphics, String value, int x, int y, int color) {
@@ -676,6 +726,7 @@ public class CampBoardScreen extends Screen {
     }
 
     private boolean selectMaterialSuggestion(double mouseX, double mouseY) {
+        if (mouseY < contentTop() || mouseY > contentBottom()) return false;
         if (mode != Mode.MATERIAL_FORM || materialItemField == null || materialSuggestions.isEmpty()) {
             return false;
         }
@@ -727,11 +778,11 @@ public class CampBoardScreen extends Screen {
     }
 
     private int panelWidth() {
-        return Math.min(390, width - 28);
+        return Math.min(430, width - 16);
     }
 
     private int panelHeight() {
-        return Math.min(280, height - 54);
+        return Math.max(110, height - 76);
     }
 
     private enum Tab {

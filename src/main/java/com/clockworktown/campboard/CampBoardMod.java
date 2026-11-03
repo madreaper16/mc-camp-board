@@ -6,9 +6,12 @@ import com.clockworktown.campboard.command.CampBoardCommands;
 import com.clockworktown.campboard.config.CampBoardConfig;
 import com.clockworktown.campboard.data.BoardState;
 import com.clockworktown.campboard.data.Project;
+import com.clockworktown.campboard.data.ProjectLookup;
 import com.clockworktown.campboard.network.BoardActionHandler;
 import com.clockworktown.campboard.network.BoardActionPayload;
 import com.clockworktown.campboard.network.OpenBoardPayload;
+import com.clockworktown.campboard.network.ConfigPayload;
+import com.clockworktown.campboard.network.BoardSessions;
 import com.clockworktown.campboard.resource.CraftingEnabledResourceCondition;
 import com.clockworktown.campboard.storage.BoardStorage;
 import net.fabricmc.api.ModInitializer;
@@ -17,6 +20,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
 import net.fabricmc.fabric.api.resource.conditions.v1.ResourceConditions;
 import net.minecraft.core.Registry;
@@ -38,14 +42,19 @@ import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CampBoardMod implements ModInitializer {
+    private static final Logger LOGGER = LoggerFactory.getLogger("camp_board");
     public static final String MOD_ID = "camp_board";
     public static final Identifier CAMP_BOARD_ID = id("camp_board");
     public static final Block CAMP_BOARD_BLOCK = registerBlock();
@@ -56,13 +65,17 @@ public class CampBoardMod implements ModInitializer {
     private static BoardState boardState = new BoardState();
     private static final Map<String, BoardState> boardStates = new HashMap<>();
     private static CampBoardConfig config = new CampBoardConfig();
+    private static CampBoardConfig clientConfig = new CampBoardConfig();
+    private static MinecraftServer activeServer;
 
     @Override
     public void onInitialize() {
         PayloadTypeRegistry.clientboundPlay().register(OpenBoardPayload.TYPE, OpenBoardPayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(ConfigPayload.TYPE, ConfigPayload.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(BoardActionPayload.TYPE, BoardActionPayload.CODEC);
         ResourceConditions.register(CraftingEnabledResourceCondition.TYPE);
         ServerPlayNetworking.registerGlobalReceiver(BoardActionPayload.TYPE, BoardActionHandler::handle);
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> BoardSessions.close(handler.player));
         CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.FUNCTIONAL_BLOCKS).register(entries -> entries.accept(new ItemStack(CAMP_BOARD_ITEM), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS));
         CreativeModeTabEvents.modifyOutputEvent(CreativeModeTabs.BUILDING_BLOCKS).register(entries -> entries.accept(new ItemStack(CAMP_BOARD_ITEM), CreativeModeTab.TabVisibility.PARENT_AND_SEARCH_TABS));
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> !state.is(CAMP_BOARD_BLOCK) || config.breakable());
@@ -76,6 +89,14 @@ public class CampBoardMod implements ModInitializer {
         });
         ServerLifecycleEvents.BEFORE_SAVE.register((server, flush, force) -> saveQuietly());
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> saveQuietly());
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            storage = null;
+            activeServer = null;
+            boardState = new BoardState();
+            boardStates.clear();
+            config = new CampBoardConfig();
+            BoardSessions.clear();
+        });
     }
 
     public static Identifier id(String path) {
@@ -94,7 +115,7 @@ public class CampBoardMod implements ModInitializer {
             try {
                 return storage == null ? new BoardState() : storage.loadBoard(id);
             } catch (IOException exception) {
-                return new BoardState();
+                throw new UncheckedIOException("Could not load board " + id + "; its file has not been changed.", exception);
             }
         });
     }
@@ -103,11 +124,23 @@ public class CampBoardMod implements ModInitializer {
         return config;
     }
 
+    public static CampBoardConfig config(net.minecraft.world.level.Level level) {
+        return level.isClientSide() ? clientConfig : config;
+    }
+
+    public static void clientConfig(CampBoardConfig updated) { clientConfig = updated; }
+
     public static void load(MinecraftServer server) throws IOException {
-        storage = new BoardStorage(serverConfigPath(server));
-        config = storage.loadConfig();
-        boardState = storage.loadBoard();
+        BoardStorage loadedStorage = new BoardStorage(serverConfigPath(server));
+        CampBoardConfig loadedConfig = loadedStorage.loadConfig();
+        BoardState loadedState = loadedStorage.loadBoard();
+        storage = loadedStorage;
+        config = loadedConfig;
+        boardState = loadedState;
         boardStates.clear();
+        activeServer = server;
+        BoardSessions.clear();
+        java.nio.file.Files.createDirectories(importDirectory(server));
     }
 
     public static void save() throws IOException {
@@ -121,41 +154,51 @@ public class CampBoardMod implements ModInitializer {
     }
 
     public static void saveBoard(String boardId) throws IOException {
-        if (storage != null && boardId != null && !boardId.isBlank()) {
-            storage.saveBoard(boardId, boardState(boardId), config);
-            storage.saveConfig(config);
-        }
+        ensureStorage();
+        if (boardId == null || boardId.isBlank()) storage.saveBoard(boardState, config);
+        else storage.saveBoard(boardId, boardState(boardId), config);
     }
 
     public static Optional<ProjectMatch> findProject(String projectId) {
-        Optional<Project> globalProject = boardState.findProject(projectId);
-        if (globalProject.isPresent()) {
-            return Optional.of(new ProjectMatch("", boardState, globalProject.get()));
-        }
+        Map<String, BoardState> boards = new LinkedHashMap<>();
+        for (String id : knownBoardIds()) boards.put(id, boardState(id));
+        return ProjectLookup.unique(boards, projectId).map(match -> new ProjectMatch(match.boardId(), match.state(), match.project()));
+    }
 
+    public static Set<String> knownBoardIds() {
         Set<String> ids = new LinkedHashSet<>(boardStates.keySet());
+        ids.add("");
         if (storage != null) {
-            try {
-                ids.addAll(storage.boardIds());
-            } catch (IOException ignored) {
-            }
+            try { ids.addAll(storage.boardIds()); }
+            catch (IOException exception) { throw new UncheckedIOException(exception); }
         }
+        return ids;
+    }
 
-        for (String boardId : ids) {
-            BoardState state = boardState(boardId);
-            Optional<Project> project = state.findProject(projectId);
-            if (project.isPresent()) {
-                return Optional.of(new ProjectMatch(boardId, state, project.get()));
-            }
-        }
-        return Optional.empty();
+    public static Optional<ProjectMatch> findProject(String projectId, String boardId) {
+        if (!knownBoardIds().contains(boardId)) return Optional.empty();
+        BoardState state = boardState(boardId);
+        return state.findProject(projectId).map(project -> new ProjectMatch(boardId, state, project));
     }
 
     public static void saveProjectMatch(ProjectMatch match) throws IOException {
-        if (match.boardId().isBlank()) {
-            save();
-        } else {
-            saveBoard(match.boardId());
+        saveBoard(match.boardId());
+        if (activeServer != null) BoardSessions.refresh(activeServer, match.boardId());
+    }
+
+    public static void replaceBoard(String id, BoardState state) {
+        if (id == null || id.isBlank()) boardState = state;
+        else boardStates.put(id, state);
+    }
+
+    public static void updateConfig(CampBoardConfig updated) throws IOException {
+        ensureStorage();
+        storage.saveConfig(updated);
+        boolean modeChanged = config.allBoardsGlobal() != updated.allBoardsGlobal();
+        config = updated;
+        if (modeChanged) BoardSessions.clear();
+        if (activeServer != null) {
+            for (var player : activeServer.getPlayerList().getPlayers()) BoardSessions.sendConfig(player);
         }
     }
 
@@ -166,23 +209,30 @@ public class CampBoardMod implements ModInitializer {
     public static void saveQuietly() {
         try {
             save();
-        } catch (IOException ignored) {
+        } catch (IOException exception) {
+            LOGGER.error("Camp Board data could not be saved", exception);
         }
     }
 
     public static Path backup() throws IOException {
         ensureStorage();
+        save();
         return storage.createBackup(config);
     }
 
     public static Path export() throws IOException {
         ensureStorage();
+        save();
         return storage.export(boardState);
     }
 
     public static void restore(String backupName) throws IOException {
         ensureStorage();
         boardState = storage.restore(backupName);
+        config = storage.loadConfig();
+        boardStates.clear();
+        BoardSessions.clear();
+        if (activeServer != null) for (var player : activeServer.getPlayerList().getPlayers()) BoardSessions.sendConfig(player);
     }
 
     public static void reload(MinecraftServer server) throws IOException {

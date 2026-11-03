@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
 
 public class Project {
     public static final int MAX_DESCRIPTION_LENGTH = 250;
@@ -147,6 +148,20 @@ public class Project {
             leaderNames().remove(leaderId);
             touch();
         }
+    }
+
+    public boolean canEdit(UUID playerId, String accountName) {
+        if (createdBy != null && createdBy.equals(playerId) || leaders.contains(playerId)) return true;
+        for (UUID leader : leaders) {
+            String name = leaderNames().get(leader);
+            if (name != null && name.equalsIgnoreCase(accountName)
+                    && leader.equals(displayLeaderId(name))) return true;
+        }
+        return false;
+    }
+
+    public static UUID displayLeaderId(String name) {
+        return UUID.nameUUIDFromBytes(("campboard-leader:" + name).getBytes(StandardCharsets.UTF_8));
     }
 
     public void log(UUID actor, String action) {

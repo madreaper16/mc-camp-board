@@ -7,7 +7,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
 public record BoardActionPayload(String actionJson) implements CustomPacketPayload {
-    public static final Type<BoardActionPayload> TYPE = new Type<>(CampBoardMod.id("board_action"));
+    public static final Type<BoardActionPayload> TYPE = new Type<>(CampBoardMod.id("board_action_v2"));
     public static final StreamCodec<RegistryFriendlyByteBuf, BoardActionPayload> CODEC = StreamCodec.composite(
             ByteBufCodecs.stringUtf8(32767),
             BoardActionPayload::actionJson,

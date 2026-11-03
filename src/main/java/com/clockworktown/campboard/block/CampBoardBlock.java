@@ -1,10 +1,8 @@
 package com.clockworktown.campboard.block;
 
 import com.clockworktown.campboard.CampBoardMod;
-import com.clockworktown.campboard.network.OpenBoardPayload;
-import com.clockworktown.campboard.storage.BoardJson;
+import com.clockworktown.campboard.network.BoardSessions;
 import com.mojang.serialization.MapCodec;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -75,7 +73,7 @@ public class CampBoardBlock extends HorizontalDirectionalBlock implements net.mi
         Direction clickedFace = context.getClickedFace();
         boolean wallMounted = clickedFace.getAxis().isHorizontal();
         Direction facing = wallMounted ? clickedFace : context.getHorizontalDirection().getOpposite();
-        boolean large = CampBoardMod.config().largeBoard();
+        boolean large = CampBoardMod.config(context.getLevel()).largeBoard();
         if (large && !canPlaceLargeBoard(context, facing)) {
             return null;
         }
@@ -116,7 +114,7 @@ public class CampBoardBlock extends HorizontalDirectionalBlock implements net.mi
         if (!level.isClientSide()) {
             if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer && level.getBlockEntity(pos) instanceof CampBoardBlockEntity boardEntity) {
                 String boardId = CampBoardMod.config().allBoardsGlobal() ? "global" : boardEntity.boardId(level);
-                ServerPlayNetworking.send(serverPlayer, new OpenBoardPayload(boardId, BoardJson.toJson(CampBoardMod.boardState(boardId))));
+                BoardSessions.open(serverPlayer, pos, boardId);
             } else {
                 player.sendSystemMessage(Component.literal("Camp Board is available."));
             }
@@ -144,7 +142,8 @@ public class CampBoardBlock extends HorizontalDirectionalBlock implements net.mi
 
     @Override
     protected float getDestroyProgress(BlockState state, Player player, BlockGetter level, BlockPos pos) {
-        return CampBoardMod.config().breakable() ? super.getDestroyProgress(state, player, level, pos) : 0.0F;
+        boolean breakable = level instanceof Level world ? CampBoardMod.config(world).breakable() : CampBoardMod.config().breakable();
+        return breakable ? super.getDestroyProgress(state, player, level, pos) : 0.0F;
     }
 
     @Override
@@ -204,6 +203,7 @@ public class CampBoardBlock extends HorizontalDirectionalBlock implements net.mi
 
         Direction across = acrossDirection(state);
         BlockPos origin = largeOrigin(pos, across, state.getValue(PART));
+        String boardId = level.getBlockEntity(pos) instanceof CampBoardBlockEntity entity ? entity.boardId() : "";
         for (int part = 0; part < 9; part++) {
             BlockPos partPos = largePartPos(origin, across, part);
             if (partPos.equals(skippedPos)) {
@@ -212,8 +212,11 @@ public class CampBoardBlock extends HorizontalDirectionalBlock implements net.mi
             BlockState partState = level.getBlockState(partPos);
             if (partState.getBlock() instanceof CampBoardBlock
                     && partState.getValue(LARGE)
+                    && partState.getValue(PART) == part
                     && partState.getValue(FACING) == state.getValue(FACING)
-                    && partState.getValue(WALL) == state.getValue(WALL)) {
+                    && partState.getValue(WALL) == state.getValue(WALL)
+                    && level.getBlockEntity(partPos) instanceof CampBoardBlockEntity entity
+                    && !boardId.isBlank() && boardId.equals(entity.boardId())) {
                 level.setBlock(partPos, Blocks.AIR.defaultBlockState(), 35);
             }
         }
@@ -225,6 +228,7 @@ public class CampBoardBlock extends HorizontalDirectionalBlock implements net.mi
         Direction across = facing.getAxis() == Direction.Axis.X ? Direction.SOUTH : Direction.EAST;
         for (int part = 0; part < 9; part++) {
             BlockPos partPos = largePartPos(origin, across, part);
+            if (level.isOutsideBuildHeight(partPos) || !level.getWorldBorder().isWithinBounds(partPos)) return false;
             if (!partPos.equals(origin) && !level.getBlockState(partPos).isAir()) {
                 return false;
             }
