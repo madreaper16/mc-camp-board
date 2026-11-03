@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.1+26.3
+
+- Port Camp Board and the 26.2 reliability improvements to Minecraft Java 26.3.
+- Update Fabric Loader to 0.20.1, Fabric API to 0.165.2+26.3, Loom to 1.17.21, and the Gradle wrapper to 9.6.0.
+- Update the build-verified optional integrations to JEI 31.14.0.72 and Mod Menu 21.0.0.
+- Remove the obsolete block codec override required by older Minecraft versions.
+- Replace the removed GLFW Tab-key constant with Minecraft's SDL-compatible input constant.
+- Release text-field focus before rebuilding or closing the board screen to keep SDL input state synchronized.
+- Retain the saved board JSON format, board IDs, material handling, backups, imports, and multiplayer fixes from the 26.2 build.
+
+Java 25 remains required. Install the 26.3 build on both clients and server. JEI's own MezzConfig dependency is required when JEI is installed.
+
+The clean build and all 20 automated regression tests pass. Live Minecraft rendering, SDL text entry, multiplayer, optional integrations at runtime, and a real-world upgrade have not been tested.
+
 ## 1.0.1+26.2
 
 Release build based on the Minecraft 26.2 port in pull request #1.

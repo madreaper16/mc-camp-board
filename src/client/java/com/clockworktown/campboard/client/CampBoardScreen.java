@@ -20,7 +20,7 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -87,6 +87,7 @@ public class CampBoardScreen extends Screen {
 
     @Override
     public void removed() {
+        setFocused(null);
         if (BoardClientState.connected()) {
             JsonObject close = base("close_board");
             ClientPlayNetworking.send(new BoardActionPayload(close.toString()));
@@ -100,6 +101,7 @@ public class CampBoardScreen extends Screen {
     }
 
     private void rebuild() {
+        setFocused(null);
         clearWidgets();
         fixedWidgets.clear();
         contentWidgets.clear();
@@ -624,7 +626,7 @@ public class CampBoardScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (event.key() == GLFW.GLFW_KEY_TAB && completeMaterialSuggestion()) {
+        if (event.key() == InputConstants.KEY_TAB && completeMaterialSuggestion()) {
             return true;
         }
         return super.keyPressed(event);
